@@ -12,7 +12,7 @@ import config
 from utils import setup_logger
 from features import load_and_merge_data, create_features
 from selection import feature_selection_funnel
-from evaluation import print_oos_benchmark, generate_quantstats_reports
+from evaluation import print_oos_benchmark, generate_quantstats_reports, optimize_threshold_roc
 from tuning import optimize_xgb, optimize_lgbm, optimize_cat
 
 def main():
