@@ -21,11 +21,11 @@ def optimize_xgb(X_train, y_train, sample_weights):
             'max_depth': trial.suggest_int('max_depth', 3, 8),
             'learning_rate': trial.suggest_float('learning_rate', 0.01, 0.2, log=True),
             'min_child_weight': trial.suggest_int('min_child_weight', 1, 10),
-            'gamma': trial.suggest_float('gamma', 0.0, 1.0),
+            'gamma': trial.suggest_float('gamma', 0.0, 2.0),
             'colsample_bytree': trial.suggest_float('colsample_bytree', 0.5, 1.0),
             'subsample': trial.suggest_float('subsample', 0.6, 1.0),
             'tree_method': 'hist',
-            'random_state': 42,
+            'random_state': 2026,
             'eval_metric': 'logloss'
         }
         
@@ -68,7 +68,7 @@ def optimize_lgbm(X_train, y_train, sample_weights):
             'min_data_in_leaf': trial.suggest_int('min_data_in_leaf', 20, 100),
             'colsample_bytree': trial.suggest_float('colsample_bytree', 0.5, 1.0),
             'subsample': trial.suggest_float('subsample', 0.6, 1.0),
-            'random_state': 42,
+            'random_state': 2026,
             'verbose': -1
         }
         
@@ -108,7 +108,7 @@ def optimize_cat(X_train, y_train, sample_weights):
             'depth': trial.suggest_int('depth', 3, 8),
             'learning_rate': trial.suggest_float('learning_rate', 0.01, 0.2, log=True),
             'l2_leaf_reg': trial.suggest_float('l2_leaf_reg', 1.0, 10.0),
-            'random_seed': 42,
+            'random_seed': 2026,
             'verbose': False
         }
         
@@ -128,7 +128,7 @@ def optimize_cat(X_train, y_train, sample_weights):
 
     optuna.logging.set_verbosity(optuna.logging.WARNING)
     study = optuna.create_study(direction='maximize')
-    study.optimize(objective, n_trials=50)
+    study.optimize(objective, n_trials=20)
     
     logger.info(f"CatBoost Best Trial ROC-AUC: {study.best_value:.4f}")
     logger.info(f"CatBoost Best Parameters: {study.best_params}")
