@@ -1,0 +1,14 @@
+pandas
+numpy
+
+yfinance
+
+scikit-learn
+xgboost
+lightgbm
+catboost
+optuna
+
+quantstats
+tabulate
+matplotlib
