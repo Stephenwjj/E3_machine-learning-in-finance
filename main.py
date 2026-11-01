@@ -1,16 +1,19 @@
 import yfinance as yf
 import pandas as pd
 import numpy as np
-from sklearn.model_selection import train_test_split, TimeSeriesSplit
+from sklearn.model_selection import train_test_split
 from xgboost import XGBClassifier
 from lightgbm import LGBMClassifier
 from catboost import CatBoostClassifier
+from sklearn.utils.class_weight import compute_sample_weight
+from sklearn.metrics import roc_curve
 
 import config
 from utils import setup_logger
 from features import load_and_merge_data, create_features
 from selection import feature_selection_funnel
 from evaluation import print_oos_benchmark, generate_quantstats_reports
+from tuning import optimize_xgb, optimize_lgbm, optimize_cat
 
 def main():
     logger = setup_logger()
@@ -59,14 +62,20 @@ def main():
 
     # Calculate class weights based on the sub-train set
     scale_pos_weight = (len(y_tr) - sum(y_tr)) / (sum(y_tr) + 1e-5)
+    sample_weights = compute_sample_weight(class_weight='balanced', y=y_tr)
 
     # ==========================================
     # 5. Model Initialization & Training
     # ==========================================
+    logger.info("Starting Bayesian Optimization (50 trials per model)...")
+    best_xgb_params = optimize_xgb(X_tr, y_tr, sample_weights)
+    best_lgbm_params = optimize_lgbm(X_tr, y_tr, sample_weights)
+    best_cat_params = optimize_cat(X_tr, y_tr, sample_weights)
+    
     models = {
-        "XGBoost": XGBClassifier(**config.MODEL_PARAMS["XGBoost"], scale_pos_weight=scale_pos_weight),
-        "LightGBM": LGBMClassifier(**config.MODEL_PARAMS["LightGBM"], scale_pos_weight=scale_pos_weight),
-        "CatBoost": CatBoostClassifier(**config.MODEL_PARAMS["CatBoost"], scale_pos_weight=scale_pos_weight)
+        "XGBoost": XGBClassifier(**best_xgb_params, scale_pos_weight=scale_pos_weight),
+        "LightGBM": LGBMClassifier(**best_lgbm_params, scale_pos_weight=scale_pos_weight),
+        "CatBoost": CatBoostClassifier(**best_cat_params, scale_pos_weight=scale_pos_weight)
     }
     
     logger.info("Training Models...")
@@ -77,22 +86,9 @@ def main():
     # ==========================================
     # 6. Threshold Optimization (Using Validation Set)
     # ==========================================
-    best_th, best_sharpe = 0.5, -np.inf
     p_val = models["XGBoost"].predict_proba(X_val)[:, 1]
-    
-    for th in np.linspace(0.5, 0.8, 31):
-        sig = (p_val >= th).astype(int)
-        if sig.sum() < 20: continue
-        
-        strat_ret_val = pd.Series(sig, index=r_val.index).shift(1).fillna(0) * r_val
-        strat_ret_val -= pd.Series(sig, index=r_val.index).diff().abs().fillna(0) * (config.COST_BPS * 1e-4)
-        
-        if strat_ret_val.std() > 0:
-            sharpe = np.sqrt(config.ANNUAL_TRADING_PERIODS) * strat_ret_val.mean() / strat_ret_val.std()
-            if sharpe > best_sharpe:
-                best_sharpe, best_th = sharpe, th
-                
-    logger.info(f"Optimal Threshold found on Validation Set: {best_th:.3f}")
+    best_th = optimize_threshold_roc(y_val, p_val)
+    logger.info(f"Optimal Threshold found on Validation Set (Max ROC-AUC): {best_th:.3f}")
 
     # ==========================================
     # 7. OOS Evaluation & Report Generation

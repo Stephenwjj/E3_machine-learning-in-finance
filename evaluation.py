@@ -3,14 +3,33 @@ import numpy as np
 import quantstats as qs
 from tabulate import tabulate
 import matplotlib.pyplot as plt
-from sklearn.metrics import roc_auc_score, precision_score, recall_score, f1_score, matthews_corrcoef
+from sklearn.metrics import roc_auc_score, precision_score, recall_score, f1_score, matthews_corrcoef, roc_curve
 from utils import max_drawdown
 import config
+import warnings
+import logging
 
 # ignore the warnings when running the model
 warnings.filterwarnings("ignore")
 logging.getLogger('matplotlib.font_manager').setLevel(logging.ERROR)
 logging.getLogger('matplotlib').setLevel(logging.ERROR)
+
+# search for max ROC-AUC trade-off 
+def optimize_threshold_roc(y_true, y_probs):
+    """
+    Finds the threshold that maximizes the distance to the diagonal (Youden's J),
+    which corresponds to maximizing the ROC-AUC trade-off.
+    """
+    fpr, tpr, thresholds = roc_curve(y_true, y_probs)
+    # Youden's J statistic = Sensitivity + Specificity - 1 = TPR - FPR
+    optimal_idx = np.argmax(tpr - fpr)
+    optimal_threshold = thresholds[optimal_idx]
+    
+    # Handle infinity threshold edge case
+    if optimal_threshold == np.inf:
+        optimal_threshold = 1.0
+        
+    return optimal_threshold
 
 # Calculates metrics AUC, F1，Sharpe, MDD, Cumulative Return and prints a formatted table on Out-of-Sample (OOS) data
 def print_oos_benchmark(models: dict, X_test: pd.DataFrame, y_test: pd.Series, ret_test: pd.Series, threshold: float = 0.5) -> pd.DataFrame:
