@@ -2,9 +2,15 @@ import pandas as pd
 import numpy as np
 import quantstats as qs
 from tabulate import tabulate
+import matplotlib.pyplot as plt
 from sklearn.metrics import roc_auc_score, precision_score, recall_score, f1_score, matthews_corrcoef
 from utils import max_drawdown
 import config
+
+# ignore the warnings when running the model
+warnings.filterwarnings("ignore")
+logging.getLogger('matplotlib.font_manager').setLevel(logging.ERROR)
+logging.getLogger('matplotlib').setLevel(logging.ERROR)
 
 # Calculates metrics AUC, F1，Sharpe, MDD, Cumulative Return and prints a formatted table on Out-of-Sample (OOS) data
 def print_oos_benchmark(models: dict, X_test: pd.DataFrame, y_test: pd.Series, ret_test: pd.Series, threshold: float = 0.5) -> pd.DataFrame:
