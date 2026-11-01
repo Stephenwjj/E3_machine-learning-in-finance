@@ -1,7 +1,7 @@
 import yfinance as yf
 import pandas as pd
 import numpy as np
-from sklearn.model_selection import train_test_split
+from sklearn.model_selection import train_test_split, TimeSeriesSplit 
 from xgboost import XGBClassifier
 from lightgbm import LGBMClassifier
 from catboost import CatBoostClassifier
@@ -68,10 +68,12 @@ def main():
     # 5. Model Initialization & Training
     # ==========================================
     logger.info("Starting Bayesian Optimization (50 trials per model)...")
+    
     best_xgb_params = optimize_xgb(X_tr, y_tr, sample_weights)
     best_lgbm_params = optimize_lgbm(X_tr, y_tr, sample_weights)
     best_cat_params = optimize_cat(X_tr, y_tr, sample_weights)
-    
+
+    logger.info("Initializing Models with Best Parameters...")
     models = {
         "XGBoost": XGBClassifier(**best_xgb_params, scale_pos_weight=scale_pos_weight),
         "LightGBM": LGBMClassifier(**best_lgbm_params, scale_pos_weight=scale_pos_weight),
@@ -86,8 +88,11 @@ def main():
     # ==========================================
     # 6. Threshold Optimization (Using Validation Set)
     # ==========================================
+    logger.info("Optimizing Threshold to Maximize ROC-AUC...")
+    
     p_val = models["XGBoost"].predict_proba(X_val)[:, 1]
     best_th = optimize_threshold_roc(y_val, p_val)
+    
     logger.info(f"Optimal Threshold found on Validation Set (Max ROC-AUC): {best_th:.3f}")
 
     # ==========================================
