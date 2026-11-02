@@ -11,7 +11,7 @@ from utils import setup_logger
 def optimize_xgb(X_train, y_train, sample_weights):
     """Uses Optuna for Bayesian optimization to maximize CV ROC-AUC."""
     logger = setup_logger()
-    logger.info("Starting XGBoost Optuna Bayesian Optimization (Max 50 trials)...")
+    logger.info("Starting XGBoost Optuna Bayesian Optimization (Max 20 trials)...")
     
     tscv = TimeSeriesSplit(n_splits=5, gap=1)
     
@@ -21,7 +21,7 @@ def optimize_xgb(X_train, y_train, sample_weights):
             'max_depth': trial.suggest_int('max_depth', 3, 8),
             'learning_rate': trial.suggest_float('learning_rate', 0.01, 0.2, log=True),
             'min_child_weight': trial.suggest_int('min_child_weight', 1, 10),
-            'gamma': trial.suggest_float('gamma', 0.0, 2.0),
+            'gamma': trial.suggest_float('gamma', 0.0, 1.0),
             'colsample_bytree': trial.suggest_float('colsample_bytree', 0.5, 1.0),
             'subsample': trial.suggest_float('subsample', 0.6, 1.0),
             'tree_method': 'hist',
@@ -45,7 +45,7 @@ def optimize_xgb(X_train, y_train, sample_weights):
 
     optuna.logging.set_verbosity(optuna.logging.WARNING)
     study = optuna.create_study(direction='maximize')
-    study.optimize(objective, n_trials=50)
+    study.optimize(objective, n_trials=20)
     
     logger.info(f"XGB Best Trial ROC-AUC: {study.best_value:.4f}")
     logger.info(f"XGB Best Parameters: {study.best_params}")
@@ -55,7 +55,7 @@ def optimize_xgb(X_train, y_train, sample_weights):
 def optimize_lgbm(X_train, y_train, sample_weights):
     """Uses Optuna for LightGBM."""
     logger = setup_logger()
-    logger.info("Starting LightGBM Optuna Bayesian Optimization (Max 50 trials)...")
+    logger.info("Starting LightGBM Optuna Bayesian Optimization (Max 20 trials)...")
     
     tscv = TimeSeriesSplit(n_splits=5, gap=1)
     
@@ -88,7 +88,7 @@ def optimize_lgbm(X_train, y_train, sample_weights):
 
     optuna.logging.set_verbosity(optuna.logging.WARNING)
     study = optuna.create_study(direction='maximize')
-    study.optimize(objective, n_trials=50)
+    study.optimize(objective, n_trials=20)
     
     logger.info(f"LGBM Best Trial ROC-AUC: {study.best_value:.4f}")
     logger.info(f"LGBM Best Parameters: {study.best_params}")
@@ -98,7 +98,7 @@ def optimize_lgbm(X_train, y_train, sample_weights):
 def optimize_cat(X_train, y_train, sample_weights):
     """Uses Optuna for CatBoost."""
     logger = setup_logger()
-    logger.info("Starting CatBoost Optuna Bayesian Optimization (Max 50 trials)...")
+    logger.info("Starting CatBoost Optuna Bayesian Optimization (Max 20 trials)...")
     
     tscv = TimeSeriesSplit(n_splits=5, gap=1)
     

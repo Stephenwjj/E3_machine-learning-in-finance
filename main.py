@@ -35,10 +35,10 @@ def main():
     # ==========================================
     logger.info("Splitting data into 80% Train and 20% Test (no shuffle)...")
     # Split features and target
-    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, shuffle=False)
+    X_train_full, X_test, y_train_full, y_test = train_test_split(X, y, test_size=0.2, shuffle=False)
     
     # Split returns to align perfectly with the train/test indices
-    r_train = ret_fwd.loc[X_train.index]
+    r_train_full = ret_fwd.loc[X_train_full.index]
     r_test = ret_fwd.loc[X_test.index]
 
     # ==========================================
@@ -50,12 +50,12 @@ def main():
     # Extract the indices from the last fold to use as our validation set
     # This ensures no look-ahead bias and respects the time series structure
     splits = list(tscv.split(X_train))
-    train_idx, val_idx = splits[-1]
+    sub_train_idx, val_idx = splits[-1]
     
     # Further split the 80% train into sub-train and validation
-    X_tr, y_tr = X_train.iloc[train_idx], y_train.iloc[train_idx]
-    X_val, y_val = X_train.iloc[val_idx], y_train.iloc[val_idx]
-    r_val = r_train.iloc[val_idx]
+    X_sub_train, y_sub_train = X_train_full.iloc[sub_train_idx], y_train_full.iloc[sub_train_idx]
+    X_val, y_val = X_train_full.iloc[val_idx], y_train_full.iloc[val_idx]
+    r_val = r_train_full.iloc[val_idx]
 
     # For final OOS testing, we strictly use the untouched 20% X_test
     X_te, y_te, r_te = X_test, y_test, r_test
@@ -67,7 +67,7 @@ def main():
     # ==========================================
     # 5. Model Initialization & Training
     # ==========================================
-    logger.info("Starting Bayesian Optimization (50 trials per model)...")
+    logger.info("Starting Bayesian Optimization...")
     
     best_xgb_params = optimize_xgb(X_tr, y_tr, sample_weights)
     best_lgbm_params = optimize_lgbm(X_tr, y_tr, sample_weights)
