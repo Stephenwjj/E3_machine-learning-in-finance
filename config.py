@@ -16,15 +16,15 @@ VAL_RATIO = 0.2
 MODEL_PARAMS = {
     "XGBoost": {
         "n_estimators": 200, "max_depth": 4, "learning_rate": 0.03,
-        "tree_method": "hist", "random_state": 42
+        "tree_method": "hist", "random_state": 2026
     },
     "LightGBM": {
         "n_estimators": 200, "num_leaves": 15, "learning_rate": 0.03,
-        "random_state": 42, "verbose": -1
+        "random_state": 2026, "verbose": -1
     },
     "CatBoost": {
         "iterations": 200, "depth": 4, "learning_rate": 0.03,
-        "verbose": False, "random_seed": 42
+        "verbose": False, "random_seed": 2026
     }
 }
 
