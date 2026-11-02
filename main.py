@@ -153,17 +153,5 @@ def main():
         if file.startswith("QuantStats_Report_") and file.endswith(".html"):
             os.rename(file, os.path.join(output_dir, file))
 
-    # 8.4 push to GitHub
-    try:
-        logger.info("Pushing results to GitHub...")
-        repo = git.Repo(search_parent_directories=True)
-        repo.git.add(output_dir)
-        repo.index.commit(f"Automated results for run: {run_time}")
-        origin = repo.remote(name='origin')
-        origin.push()
-        logger.info("Successfully pushed to GitHub!")
-    except Exception as e:
-        logger.warning(f"GitHub push failed. Please ensure that GitPython is installed: {e}")
-
 if __name__ == "__main__":
     main()

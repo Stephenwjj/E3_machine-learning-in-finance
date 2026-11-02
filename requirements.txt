@@ -12,5 +12,3 @@ optuna
 quantstats
 tabulate
 matplotlib
-
-GitPython

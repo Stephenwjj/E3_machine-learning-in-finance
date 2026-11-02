@@ -119,4 +119,4 @@ def generate_quantstats_reports(models: dict, X_test: pd.DataFrame, ret_test: pd
             output=html_filename,
             title=f"XAUUSD H1 - {name}"
         )
-        print(f"[+] Saved: {html_filename}")
+        print(f"Saved: {html_filename}")

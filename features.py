@@ -70,8 +70,8 @@ def create_features(df: pd.DataFrame, fwd_h: int, cost_bps: float, vol_mult: flo
     """
     for n in [1, 4, 8, 12, 24, 48, 72, 120]:
         f[f"ret_{n}h"] = calculate_log_returns(c, n)
-        f["lag1_autocorr_6"] = r.rolling(6).apply(lambda x: pd.Series(x).autocorr(1), raw=False)
-        f["lag1_autocorr_24"] = r.rolling(24).apply(lambda x: pd.Series(x).autocorr(1), raw=False)
+    f["lag1_autocorr_6"] = r.rolling(6).apply(lambda x: pd.Series(x).autocorr(1), raw=False)
+    f["lag1_autocorr_24"] = r.rolling(24).apply(lambda x: pd.Series(x).autocorr(1), raw=False)
 
     """    
     # 3. Volatility & Microstructure:
@@ -93,8 +93,6 @@ def create_features(df: pd.DataFrame, fwd_h: int, cost_bps: float, vol_mult: flo
     
     f["volume_zscore_24"] = calculate_zscore(v, 24)
     f["price_volume_corr_12"] = r.rolling(12).corr(v.pct_change())
-    if 'spread' in df.columns:
-        f['spread_zscore'] = calculate_zscore(df['spread'], 24)
 
 
     # 4. Volume & VWAP (5)
@@ -108,6 +106,7 @@ def create_features(df: pd.DataFrame, fwd_h: int, cost_bps: float, vol_mult: flo
     f["price_volume_corr_12"] = r.rolling(12).corr(v.pct_change())
     f["body_ratio"] = ((c - o).abs() / (h - l + 1e-12))
     f["upper_shadow"] = (h - np.maximum(o, c)) / (h - l + 1e-12)
+    f["lower_shadow"] = (np.minimum(o, c) - l) / (h - l + EPS)
     
     
     """
@@ -116,21 +115,17 @@ def create_features(df: pd.DataFrame, fwd_h: int, cost_bps: float, vol_mult: flo
     nlp_fear_sentiment: assume that if VIX is rising (panic in the stock market) and the Dollar is falling (weak USD), money will flow into Gold as a safe-haven asset.
     """
     if 'dxy' in df.columns:
-        for n in [1, 6, 24]:
+        for n in [1, 8, 24]:
             f[f"dxy_chg_{n}h"] = calculate_log_returns(df['dxy'], n)
             f[f"us10y_chg_{n}h"] = calculate_log_returns(df['us10y'], n)
             f[f"vix_chg_{n}h"] = calculate_log_returns(df['vix'], n)
         f["dxy_corr_48"] = r.rolling(48).corr(np.log(df['dxy']/df['dxy'].shift(1)))
         f["nlp_fear_sentiment"] = (f["vix_chg_1h"] - f["dxy_chg_1h"]) / 2.0
+        f["nlp_sentiment_smooth"] = f["nlp_fear_sentiment"].rolling(4).mean()
 
     # 5. Event Driven (NFP), is_nfp_hour: when the US Non-Farm Payrolls report is released;
     is_first_friday = (df.index.dayofweek == 4) & (df.index.day <= 7)
     f["is_nfp_hour"] = (is_first_friday & (df.index.hour.isin([12, 13]))).astype(int)
-
-    # 7. Time & Events (5)
-    utc = df.index.tz_convert("UTC")
-    is_first_friday = (utc.dayofweek == 4) & (utc.day <= 7)
-    f["is_nfp_hour"] = (is_first_friday & (utc.hour.isin([12, 13]))).astype(int)
        
     """
     7. Dynamic Volatility Labeling:
@@ -141,8 +136,7 @@ def create_features(df: pd.DataFrame, fwd_h: int, cost_bps: float, vol_mult: flo
     X = f.shift(1)
     y_raw = np.log(c.shift(-fwd_h) / c)
     cost = cost_bps * 1e-4
-    raw_rv_24 = r.rolling(24).std()
-    dynamic_threshold = (vol_mult * raw_rv_24) + cost
+    dynamic_threshold = (1.5 * tr.rolling(14).mean() / c) + cost 
     
     # label = 1 if y_raw > dynamic_threshold, otherwise label = 0
     y = pd.Series(0, index=df.index, name="Label")
