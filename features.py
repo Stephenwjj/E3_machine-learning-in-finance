@@ -106,7 +106,7 @@ def create_features(df: pd.DataFrame, fwd_h: int, cost_bps: float, vol_mult: flo
     f["price_volume_corr_12"] = r.rolling(12).corr(v.pct_change())
     f["body_ratio"] = ((c - o).abs() / (h - l + 1e-12))
     f["upper_shadow"] = (h - np.maximum(o, c)) / (h - l + 1e-12)
-    f["lower_shadow"] = (np.minimum(o, c) - l) / (h - l + EPS)
+    f["lower_shadow"] = (np.minimum(o, c) - l) / (h - l + 1e-12)
     
     
     """
