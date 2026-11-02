@@ -4,7 +4,6 @@ import datetime
 import yfinance as yf
 import pandas as pd
 import numpy as np
-import git
 from sklearn.model_selection import train_test_split, TimeSeriesSplit 
 from xgboost import XGBClassifier
 from lightgbm import LGBMClassifier
@@ -33,7 +32,7 @@ def convert_to_serializable(obj):
     return obj
 
 run_time = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-output_dir = f"output_reports/run_{run_time}"
+output_dir = f"log/run_{run_time}"
 os.makedirs(output_dir, exist_ok=True)
 
 def main():
@@ -149,7 +148,7 @@ def main():
             "Optimal_Threshold": best_th
         }), f, indent=4)
 
-    # 8.3 collect HTML report and save to output_dir
+    # 8.3 collect HTML report and save to file
     for file in os.listdir("."):
         if file.startswith("QuantStats_Report_") and file.endswith(".html"):
             os.rename(file, os.path.join(output_dir, file))
