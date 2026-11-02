@@ -1,6 +1,10 @@
+import os
+import json
+import datetime
 import yfinance as yf
 import pandas as pd
 import numpy as np
+import git
 from sklearn.model_selection import train_test_split, TimeSeriesSplit 
 from xgboost import XGBClassifier
 from lightgbm import LGBMClassifier
@@ -14,6 +18,10 @@ from features import load_and_merge_data, create_features
 from selection import feature_selection_funnel
 from evaluation import print_oos_benchmark, generate_quantstats_reports, optimize_threshold_roc
 from tuning import optimize_xgb, optimize_lgbm, optimize_cat
+
+run_time = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+output_dir = f"outputs/run_{run_time}"
+os.makedirs(output_dir, exist_ok=True)
 
 def main():
     logger = setup_logger()
@@ -33,7 +41,7 @@ def main():
     # ==========================================
     # 3. Dataset Splitting (80% Train, 20% Test)
     # ==========================================
-    logger.info("Splitting data into 80% Train and 20% Test (no shuffle)...")
+    logger.info("Splitting data into 80% Train and 20% Test...")
     # Split features and target
     X_train_full, X_test, y_train_full, y_test = train_test_split(X, y, test_size=0.2, shuffle=False)
     
@@ -49,7 +57,7 @@ def main():
     
     # Extract the indices from the last fold to use as our validation set
     # This ensures no look-ahead bias and respects the time series structure
-    splits = list(tscv.split(X_train))
+    splits = list(tscv.split(X_train_full))
     sub_train_idx, val_idx = splits[-1]
     
     # Further split the 80% train into sub-train and validation
@@ -61,17 +69,17 @@ def main():
     X_te, y_te, r_te = X_test, y_test, r_test
 
     # Calculate class weights based on the sub-train set
-    scale_pos_weight = (len(y_tr) - sum(y_tr)) / (sum(y_tr) + 1e-5)
-    sample_weights = compute_sample_weight(class_weight='balanced', y=y_tr)
+    scale_pos_weight = (len(y_sub_train) - sum(y_sub_train)) / (sum(y_sub_train) + 1e-5)
+    sample_weights = compute_sample_weight(class_weight='balanced', y=y_sub_train)
 
     # ==========================================
     # 5. Model Initialization & Training
     # ==========================================
     logger.info("Starting Bayesian Optimization...")
     
-    best_xgb_params = optimize_xgb(X_tr, y_tr, sample_weights)
-    best_lgbm_params = optimize_lgbm(X_tr, y_tr, sample_weights)
-    best_cat_params = optimize_cat(X_tr, y_tr, sample_weights)
+    best_xgb_params = optimize_xgb(X_sub_train, y_sub_train, sample_weights)
+    best_lgbm_params = optimize_lgbm(X_sub_train, y_sub_train, sample_weights)
+    best_cat_params = optimize_cat(X_sub_train, y_sub_train, sample_weights)
 
     logger.info("Initializing Models with Best Parameters...")
     models = {
@@ -82,7 +90,7 @@ def main():
     
     logger.info("Training Models...")
     for name, model in models.items():
-        model.fit(X_tr, y_tr)
+        model.fit(X_sub_train, y_sub_train)
         logger.info(f"{name} trained successfully.")
 
     # ==========================================
@@ -98,7 +106,7 @@ def main():
     # ==========================================
     # 7. OOS Evaluation & Report Generation
     # ==========================================
-    print_oos_benchmark(models, X_te, y_te, r_te, threshold=best_th)
+    metrics_df = print_oos_benchmark(models, X_te, y_te, r_te, threshold=best_th)
     
     # Fetch Benchmark (GLD) for QuantStats
     test_start = r_te.index.min().strftime('%Y-%m-%d')
@@ -112,6 +120,38 @@ def main():
 
     generate_quantstats_reports(models, X_te, r_te, bench_ret_aligned, threshold=best_th)
     logger.info("Pipeline finished successfully.")
+
+    logger.info(f"Saving results to {output_dir}...")
+    
+    # 8.1 save index to CSV
+    if isinstance(metrics_df, pd.DataFrame):
+        metrics_df.to_csv(os.path.join(output_dir, "metrics.csv"), index=False)
+        
+    # 8.2 save best parameters to JSON
+    with open(os.path.join(output_dir, "best_params.json"), "w") as f:
+        json.dump({
+            "XGBoost": best_xgb_params,
+            "LightGBM": best_lgbm_params,
+            "CatBoost": best_cat_params,
+            "Optimal_Threshold": best_th
+        }, f, indent=4)
+
+    # 8.3 collect HTML report and save to output_dir
+    for file in os.listdir("."):
+        if file.startswith("QuantStats_Report_") and file.endswith(".html"):
+            os.rename(file, os.path.join(output_dir, file))
+
+    # 8.4 push to GitHub
+    try:
+        logger.info("Pushing results to GitHub...")
+        repo = git.Repo(search_parent_directories=True)
+        repo.git.add(output_dir)
+        repo.index.commit(f"Automated results for run: {run_time}")
+        origin = repo.remote(name='origin')
+        origin.push()
+        logger.info("Successfully pushed to GitHub!")
+    except Exception as e:
+        logger.warning(f"GitHub push failed. Please ensure that GitPython is installed: {e}")
 
 if __name__ == "__main__":
     main()
