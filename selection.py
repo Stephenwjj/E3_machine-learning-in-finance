@@ -38,9 +38,20 @@ def feature_selection_funnel(X: pd.DataFrame, y: pd.Series, mi_top_k: int, corr_
     logger.info(f"Filter (Correlation) retained {len(keep_corr)} features.")
 
     # 3. Wrapper Method: RFECV
+    outlier_features = ['macd_hist']
+    outlier_cols = [c for c in keep_corr if c in outlier_features]
+    other_cols = [c for c in keep_corr if c not in outlier_features]
+    
+    preprocessor = ColumnTransformer(
+        transformers=[
+            ('robust', RobustScaler(), outlier_cols),
+            ('standard', StandardScaler(), other_cols)
+        ]
+    )
+    
     tscv = TimeSeriesSplit(n_splits=3, gap=1)
     est = Pipeline([
-        ("sc", StandardScaler()),
+        ("sc", preprocessor),
         ("clf", LogisticRegression(class_weight="balanced", solver="liblinear"))
     ])
     
@@ -63,7 +74,7 @@ def feature_selection_funnel(X: pd.DataFrame, y: pd.Series, mi_top_k: int, corr_
     l1_model.fit(X_scaled, y)
     
     # Keep only features where the coefficient is not shrunk to zero
-    final_feats = [c for c, w in zip(keep_wrap, l1_model.coef_[0]) if abs(w) > 1e-5]
+    final_feats = [c for c, w in zip(keep_wrap, l1_model.coef_[0]) if abs(w) > 1e-6]
     logger.info(f"Embedded (L1) retained {len(final_feats)} final features.")
     logger.info(f"Final selected features: {final_feats}")
     
