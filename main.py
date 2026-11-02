@@ -19,8 +19,21 @@ from selection import feature_selection_funnel
 from evaluation import print_oos_benchmark, generate_quantstats_reports, optimize_threshold_roc
 from tuning import optimize_xgb, optimize_lgbm, optimize_cat
 
+def convert_to_serializable(obj):
+    if isinstance(obj, dict):
+        return {k: convert_to_serializable(v) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [convert_to_serializable(v) for v in obj]
+    elif isinstance(obj, (np.float32, np.float64)):
+        return float(obj)
+    elif isinstance(obj, (np.int32, np.int64)):
+        return int(obj)
+    elif isinstance(obj, np.bool_):
+        return bool(obj)
+    return obj
+
 run_time = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-output_dir = f"outputs/run_{run_time}"
+output_dir = f"output_reports/run_{run_time}"
 os.makedirs(output_dir, exist_ok=True)
 
 def main():
@@ -129,12 +142,12 @@ def main():
         
     # 8.2 save best parameters to JSON
     with open(os.path.join(output_dir, "best_params.json"), "w") as f:
-        json.dump({
+        json.dump(convert_to_serializable({
             "XGBoost": best_xgb_params,
             "LightGBM": best_lgbm_params,
             "CatBoost": best_cat_params,
             "Optimal_Threshold": best_th
-        }, f, indent=4)
+        }), f, indent=4)
 
     # 8.3 collect HTML report and save to output_dir
     for file in os.listdir("."):
