@@ -180,12 +180,14 @@ def main():
     best_cat = optimize_cat(X_sub_tr_s1, y_sub_train, sample_weights)
 
     best_cat.pop('verbose',None)
-    best_cat['logging_level'] = 'Silent'
+    best_cat.pop('Logging_level',None)
+    best_cat.pop('verbose_eval',None)
+    best_cat.pop('silent',None)
     
     models_tuned = {
         "XGBoost": XGBClassifier(**best_xgb, scale_pos_weight=scale_pos_weight),
         "LightGBM": LGBMClassifier(**best_lgb, scale_pos_weight=scale_pos_weight),
-        "CatBoost": CatBoostClassifier(**best_cat, scale_pos_weight=scale_pos_weight,verbose=False)
+        "CatBoost": CatBoostClassifier(**best_cat, scale_pos_weight=scale_pos_weight,silent=True)
     }
     for model in models_tuned.values():
         model.fit(X_sub_tr_s1, y_sub_train)
@@ -224,7 +226,7 @@ def main():
     models_dedup = {
         "XGBoost (Dedup)": XGBClassifier(**best_xgb, scale_pos_weight=scale_pos_weight),
         "LightGBM (Dedup)": LGBMClassifier(**best_lgb, scale_pos_weight=scale_pos_weight),
-        "CatBoost (Dedup)": CatBoostClassifier(**best_cat, scale_pos_weight=scale_pos_weight)
+        "CatBoost (Dedup)": CatBoostClassifier(**best_cat, scale_pos_weight=scale_pos_weight, silent=True)
     }
     for model in models_dedup.values():
         model.fit(X_sub_tr_s3, y_sub_train)
