@@ -203,30 +203,12 @@ def feature_selection_funnel(X: pd.DataFrame, y: pd.Series, mi_top_k: int, corr_
     keep_corr = [c for c in keep_mi if c not in drop_cols]
     logger.info(f"Filter (Correlation) retained {len(keep_corr)} features.")
 
-    # 3. Wrapper Method: RFECV with ColumnTransformer and RobustScaler
-    outlier_features = ['macd_hist', 'rsi_14']
-    
-    # 必须基于筛选后的 X[keep_corr] 来获取数字索引
-    X_keep_corr = X[keep_corr]
-    col_idx = {c: i for i, c in enumerate(X_keep_corr.columns)}
-    
-    outlier_cols = [c for c in keep_corr if c in outlier_features]
-    other_cols = [c for c in keep_corr if c not in outlier_features]
-
-    outlier_idx = [col_idx[c] for c in outlier_cols]
-    other_idx = [col_idx[c] for c in other_cols]
-
-    preprocessor = ColumnTransformer(
-        transformers=[
-            ('robust', RobustScaler(), outlier_idx),
-            ('standard', StandardScaler(), other_idx)
-        ],
-        remainder='passthrough'
-    )
-
+    # 3. Wrapper Method: RFECV (Exactly matches PDF Page 12)
+    # Note: Using ColumnTransformer here causes IndexErrors because RFECV 
+    # removes features iteratively, breaking fixed column indices.
     tscv = TimeSeriesSplit(n_splits=3, gap=1)
     est = Pipeline([
-        ("sc", preprocessor),
+        ("sc", StandardScaler()), 
         ("clf", LogisticRegression(class_weight="balanced", solver="liblinear"))
     ])
     
@@ -234,11 +216,11 @@ def feature_selection_funnel(X: pd.DataFrame, y: pd.Series, mi_top_k: int, corr_
         estimator=est, step=1, cv=tscv, scoring="roc_auc",
         min_features_to_select=8, importance_getter='named_steps.clf.coef_', n_jobs=1
     )
-    rfecv.fit(X_keep_corr, y)
-    keep_wrap = X_keep_corr.columns[rfecv.support_].tolist()
+    rfecv.fit(X[keep_corr], y)
+    keep_wrap = X[keep_corr].columns[rfecv.support_].tolist()
     logger.info(f"Wrapper (RFECV) retained {len(keep_wrap)} features.")
     
-    # 4. Embedded Method: L1 Regularization
+    # 4. Embedded Method: L1 Regularization (Exactly matches PDF Page 12)
     X_scaled = StandardScaler().fit_transform(X[keep_wrap])
     l1_model = LogisticRegression(penalty='l1', solver='liblinear', C=l1_c, class_weight='balanced', max_iter=2000)
     l1_model.fit(X_scaled, y)
