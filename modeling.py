@@ -28,7 +28,7 @@ logging.getLogger('matplotlib').setLevel(logging.ERROR)
 class Config:
     FILE_PATH = 'data/XAUUSD_H1_202001020100_202606302300.csv'
     FORWARD_HOURS = 12
-    COST_BPS = 4.0
+    COST_BPS = 3.0
     VOL_MULTIPLIER = 1.0
     TRAIN_RATIO = 0.6
     VAL_RATIO = 0.2
