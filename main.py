@@ -38,6 +38,8 @@ def convert_to_serializable(obj):
         return bool(obj)
     return obj
 
+os.chdir(os.path.dirname(os.path.abspath(__file__)))
+
 run_time = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
 output_dir = f"log/run_{run_time}"
 os.makedirs(output_dir, exist_ok=True)
