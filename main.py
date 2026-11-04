@@ -140,13 +140,13 @@ def main():
     r_train_full = ret_fwd.loc[X_train_full.index]
     r_test_log = ret_fwd.loc[X_test.index]
 
-    bench_wealth = np.exp(r_test.cumsum())
+    # Benchmark calculation
+    bench_wealth = np.exp(r_test_log.cumsum())
     bench_pct_ret = bench_wealth.pct_change().dropna()
     bench_ret_aligned = bench_pct_ret.tz_localize(None) if bench_pct_ret.index.tz is not None else bench_pct_ret
     
-    # Convert to simple returns for benchmark and backtest
+    # Convert to simple returns for backtest
     r_test = np.exp(r_test_log) - 1
-    bench_wealth = np.exp(r_test_log.cumsum())
     bench_ret = bench_wealth.pct_change().fillna(0)
     
     if r_test.index.tz is not None:
@@ -169,7 +169,6 @@ def main():
 
     # Helper function for scaling
     def scale_features(train_df, val_df, test_df, features):
-        # Apply RobustScaler to outlier features, StandardScaler to others
         outlier_feats = [c for c in ['macd_hist', 'rsi_14'] if c in features]
         other_feats = [c for c in features if c not in outlier_feats]
         
@@ -203,6 +202,9 @@ def main():
                                        threshold=best_th_s1, bench_ret=bench_ret, 
                                        stage_name="STAGE 1: BASELINE", plot_curves=True)
 
+    # Generate Stage 1 QuantStats
+    generate_quantstats_reports({"XGBoost Baseline": baseline_model}, X_te_s1, r_test, bench_ret_aligned, threshold=best_th_s1, prefix="stage1_")
+
     # ==========================================
     # STAGE 2: Tuned Models (Before Deduplication)
     # ==========================================
@@ -214,15 +216,15 @@ def main():
     best_lgb = optimize_lgbm(X_sub_tr_s1, y_sub_train, sample_weights)
     best_cat = optimize_cat(X_sub_tr_s1, y_sub_train, sample_weights)
 
-    best_cat.pop('verbose',None)
-    best_cat.pop('Logging_level',None)
-    best_cat.pop('verbose_eval',None)
-    best_cat.pop('silent',None)
+    best_cat.pop('verbose', None)
+    best_cat.pop('logging_level', None)
+    best_cat.pop('verbose_eval', None)
+    best_cat.pop('silent', None)
     
     models_tuned = {
         "XGBoost": XGBClassifier(**best_xgb, scale_pos_weight=scale_pos_weight),
         "LightGBM": LGBMClassifier(**best_lgb, scale_pos_weight=scale_pos_weight),
-        "CatBoost": CatBoostClassifier(**best_cat, scale_pos_weight=scale_pos_weight,silent=True)
+        "CatBoost": CatBoostClassifier(**best_cat, scale_pos_weight=scale_pos_weight, silent=True)
     }
     for model in models_tuned.values():
         model.fit(X_sub_tr_s1, y_sub_train)
@@ -244,6 +246,9 @@ def main():
     plt.savefig("XGBoost_Feature_Importance_Stage2.png", dpi=150)
     plt.close()
 
+    # Generate Stage 2 QuantStats
+    generate_quantstats_reports(models_tuned, X_te_s1, r_test, bench_ret_aligned, threshold=best_th_s2, prefix="stage2_")
+
     # ==========================================
     # STAGE 3: Feature Deduplication & Re-evaluation
     # ==========================================
@@ -254,7 +259,9 @@ def main():
     dedup_feats = remove_redundant_features(final_feats)
     dropped_feats = set(final_feats) - set(dedup_feats)
     logger.info(f"Dropped redundant features: {dropped_feats}")
-    logger.info(f"Remaining features ({len(dedup_feats)}): {dedup_feats}")
+    
+    # Print Final Selected Features explicitly
+    logger.info(f"Final selected features after deduplication ({len(dedup_feats)}): {dedup_feats}")
     
     X_sub_tr_s3, X_val_s3, X_te_s3 = scale_features(X_sub_train, X_val, X_test, dedup_feats)
     
@@ -287,6 +294,9 @@ def main():
     plt.savefig("XGBoost_Feature_Importance_Stage3.png", dpi=150)
     plt.close()
 
+    # Generate Stage 3 QuantStats
+    generate_quantstats_reports(models_dedup, X_te_s3, r_test, bench_ret_aligned, threshold=best_th_s3, prefix="stage3_")
+
     # ==========================================
     # STAGE 4: Stop-Loss Risk Management
     # ==========================================
@@ -305,9 +315,7 @@ def main():
     logger.info("STAGE 5: VOLATILITY TARGETING & STOP-LOSS (Aiming for Max DD < 15%)")
     logger.info("="*80)
     
-    # Target annualized volatility (e.g., 10%)
     target_vol = 0.10
-    # Calculate rolling 24-hour volatility (annualized)
     rolling_vol = r_test.rolling(24).std() * np.sqrt(config.ANNUAL_TRADING_PERIODS)
     
     stage5_results = []
@@ -323,7 +331,6 @@ def main():
         "Max DD (%)": round(bench_mdd_s5 * 100, 2), "Cum Ret (%)": round(bench_cum_ret_s5 * 100, 2)
     })
 
-    # Plotting setup for Stage 5
     fig, axes = plt.subplots(len(models_dedup), 3, figsize=(15, 5 * len(models_dedup)))
     if len(models_dedup) == 1: axes = [axes]
 
@@ -337,22 +344,16 @@ def main():
         f1 = f1_score(y_test, y_pred, zero_division=0)
         mcc = matthews_corrcoef(y_test, y_pred)
         
-        # Apply Volatility Targeting Position Sizing
         signals = pd.Series(y_pred, index=r_test.index).shift(1).fillna(0)
         position_size = (target_vol / (rolling_vol + 1e-6)).clip(upper=1.0).fillna(0)
         signals_sized = signals * position_size
         
-        # Calculate strategy returns with position sizing
         strat_ret = signals_sized * r_test
-        
-        # Apply 2% Stop-Loss
         strat_ret[strat_ret < -0.02] = -0.02
         
-        # Calculate turnover and costs
         turnover = signals_sized.diff().abs().fillna(0)
         strat_ret = (strat_ret - turnover * (config.COST_BPS * 1e-4)).dropna()
         
-        # Calculate metrics
         if len(strat_ret) == 0:
             cum_ret, mdd, sharpe = 0.0, 0.0, 0.0
         else:
@@ -367,7 +368,6 @@ def main():
             "Sharpe (H1)": round(sharpe, 2), "Max DD (%)": round(mdd * 100, 2), "Cum Ret (%)": round(cum_ret * 100, 2)
         })
 
-        # Plot curves for Stage 5
         cm = confusion_matrix(y_test, y_pred)
         ConfusionMatrixDisplay(cm).plot(ax=axes[i][0], colorbar=False)
         axes[i][0].set_title(f"{name} - Confusion Matrix (VolTarget)")
@@ -393,8 +393,8 @@ def main():
     stat, pval = mcnemar_test(y_test.values, y_pred_final, np.ones(len(y_test)))
     logger.info(f"McNemar Test (Final Model vs Always Up): Statistic={stat:.4f}, p-value={pval:.4e}")
 
-    # Generate QuantStats
-    generate_quantstats_reports(models_dedup, X_te_s3, r_test_log, bench_ret, threshold=best_th_s3)
+    # Generate Final QuantStats (Stage 3 models)
+    generate_quantstats_reports(models_dedup, X_te_s3, r_test, bench_ret_aligned, threshold=best_th_s3)
 
     # ==========================================
     # 7. Save Results
