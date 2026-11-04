@@ -16,6 +16,7 @@ from sklearn.model_selection import train_test_split, TimeSeriesSplit
 from sklearn.compose import ColumnTransformer
 from sklearn.preprocessing import StandardScaler, RobustScaler
 from sklearn.utils.class_weight import compute_sample_weight
+from sklearn.metrics import roc_auc_score, precision_score, recall_score, f1_score, matthews_corrcoef
 
 # Model imports
 from xgboost import XGBClassifier
@@ -133,6 +134,7 @@ def main():
 
     # Helper function for scaling
     def scale_features(train_df, val_df, test_df, features):
+        # Apply RobustScaler to outlier features, StandardScaler to others
         outlier_feats = [c for c in ['macd_hist', 'rsi_14'] if c in features]
         other_feats = [c for c in features if c not in outlier_feats]
         
@@ -252,7 +254,95 @@ def main():
                                      stop_loss_pct=0.02, stage_name="STAGE 4: STOP-LOSS APPLIED", plot_curves=True)
 
     # ==========================================
-    # 5. McNemar Test & Benchmark Comparison
+    # STAGE 5: Advanced Risk Management (Volatility Targeting + Stop-Loss)
+    # ==========================================
+    logger.info("\n" + "="*80)
+    logger.info("STAGE 5: VOLATILITY TARGETING & STOP-LOSS (Aiming for Max DD < 15%)")
+    logger.info("="*80)
+    
+    # Target annualized volatility (e.g., 10%)
+    target_vol = 0.10
+    # Calculate rolling 24-hour volatility (annualized)
+    rolling_vol = r_test.rolling(24).std() * np.sqrt(config.ANNUAL_TRADING_PERIODS)
+    
+    stage5_results = []
+    
+    # Add Benchmark to Stage 5 results
+    bench_wealth_s5 = (1 + bench_ret).cumprod()
+    bench_cum_ret_s5 = bench_wealth_s5.iloc[-1] - 1.0
+    bench_mdd_s5 = max_drawdown(bench_wealth_s5)
+    bench_sharpe_s5 = np.sqrt(config.ANNUAL_TRADING_PERIODS) * bench_ret.mean() / (bench_ret.std() + 1e-12) if bench_ret.std() > 0 else 0.0
+    stage5_results.append({
+        "Model": "Benchmark (Buy & Hold)", "ROC-AUC": np.nan, "Precision": np.nan, "Recall": np.nan, 
+        "F1-Score": np.nan, "MCC": np.nan, "Sharpe (H1)": round(bench_sharpe_s5, 2), 
+        "Max DD (%)": round(bench_mdd_s5 * 100, 2), "Cum Ret (%)": round(bench_cum_ret_s5 * 100, 2)
+    })
+
+    # Plotting setup for Stage 5
+    fig, axes = plt.subplots(len(models_dedup), 3, figsize=(15, 5 * len(models_dedup)))
+    if len(models_dedup) == 1: axes = [axes]
+
+    for i, (name, model) in enumerate(models_dedup.items()):
+        p_te = model.predict_proba(X_te_s3)[:, 1]
+        y_pred = (p_te >= best_th_s3).astype(int)
+        
+        auc_roc = roc_auc_score(y_test, p_te)
+        precision = precision_score(y_test, y_pred, zero_division=0)
+        recall = recall_score(y_test, y_pred, zero_division=0)
+        f1 = f1_score(y_test, y_pred, zero_division=0)
+        mcc = matthews_corrcoef(y_test, y_pred)
+        
+        # Apply Volatility Targeting Position Sizing
+        signals = pd.Series(y_pred, index=r_test.index).shift(1).fillna(0)
+        position_size = (target_vol / (rolling_vol + 1e-6)).clip(upper=1.0).fillna(0)
+        signals_sized = signals * position_size
+        
+        # Calculate strategy returns with position sizing
+        strat_ret = signals_sized * r_test
+        
+        # Apply 2% Stop-Loss
+        strat_ret[strat_ret < -0.02] = -0.02
+        
+        # Calculate turnover and costs
+        turnover = signals_sized.diff().abs().fillna(0)
+        strat_ret = (strat_ret - turnover * (config.COST_BPS * 1e-4)).dropna()
+        
+        # Calculate metrics
+        if len(strat_ret) == 0:
+            cum_ret, mdd, sharpe = 0.0, 0.0, 0.0
+        else:
+            cum_wealth = (1 + strat_ret).cumprod()
+            cum_ret = cum_wealth.iloc[-1] - 1.0
+            mdd = max_drawdown(cum_wealth)
+            sharpe = np.sqrt(config.ANNUAL_TRADING_PERIODS) * strat_ret.mean() / (strat_ret.std() + 1e-12) if strat_ret.std() > 0 else 0.0
+
+        stage5_results.append({
+            "Model": f"{name} + VolTarget", "ROC-AUC": round(auc_roc, 4), "Precision": round(precision, 4),
+            "Recall": round(recall, 4), "F1-Score": round(f1, 4), "MCC": round(mcc, 4),
+            "Sharpe (H1)": round(sharpe, 2), "Max DD (%)": round(mdd * 100, 2), "Cum Ret (%)": round(cum_ret * 100, 2)
+        })
+
+        # Plot curves for Stage 5
+        cm = confusion_matrix(y_test, y_pred)
+        ConfusionMatrixDisplay(cm).plot(ax=axes[i][0], colorbar=False)
+        axes[i][0].set_title(f"{name} - Confusion Matrix (VolTarget)")
+        RocCurveDisplay.from_predictions(y_test, p_te, ax=axes[i][1])
+        axes[i][1].set_title(f"{name} - ROC Curve")
+        PrecisionRecallDisplay.from_predictions(y_test, p_te, ax=axes[i][2])
+        axes[i][2].set_title(f"{name} - PR Curve")
+
+    plt.tight_layout()
+    plt.savefig("Model_Evaluation_Curves_STAGE_5_VOL_TARGET.png", dpi=150)
+    plt.close()
+
+    df_s5 = pd.DataFrame(stage5_results)
+    print("\n" + "="*115)
+    print(f"STAGE 5: VOLATILITY TARGETING & STOP-LOSS")
+    print("="*115)
+    print(df_s5.to_markdown(index=False))
+
+    # ==========================================
+    # 6. McNemar Test & Benchmark Comparison
     # ==========================================
     y_pred_final = (models_dedup["XGBoost (Dedup)"].predict_proba(X_te_s3)[:, 1] >= best_th_s3).astype(int)
     stat, pval = mcnemar_test(y_test.values, y_pred_final, np.ones(len(y_test)))
@@ -262,13 +352,14 @@ def main():
     generate_quantstats_reports(models_dedup, X_te_s3, r_test_log, bench_ret, threshold=best_th_s3)
 
     # ==========================================
-    # 6. Save Results
+    # 7. Save Results
     # ==========================================
     logger.info(f"\nSaving all results to {output_dir}...")
     metrics_base.to_csv(os.path.join(output_dir, "1_metrics_baseline.csv"), index=False)
     metrics_tuned.to_csv(os.path.join(output_dir, "2_metrics_tuned.csv"), index=False)
     metrics_dedup.to_csv(os.path.join(output_dir, "3_metrics_dedup.csv"), index=False)
     metrics_sl.to_csv(os.path.join(output_dir, "4_metrics_stoploss.csv"), index=False)
+    df_s5.to_csv(os.path.join(output_dir, "5_metrics_vol_target.csv"), index=False)
     
     with open(os.path.join(output_dir, "best_params.json"), "w") as f:
         json.dump(convert_to_serializable({
