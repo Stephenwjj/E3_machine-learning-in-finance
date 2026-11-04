@@ -18,7 +18,8 @@ from sklearn.utils.class_weight import compute_sample_weight
 from modeling import (
     config, setup_logger, load_and_merge_data, create_features,
     feature_selection_funnel, print_oos_benchmark, 
-    generate_quantstats_reports, optimize_threshold_roc
+    generate_quantstats_reports, optimize_threshold_roc,
+    mcnemar_test, backtest_with_stop_loss
 )
 from tuning import optimize_xgb, optimize_lgbm, optimize_cat
 
@@ -222,9 +223,9 @@ def main():
     metrics_base = print_oos_benchmark({"XGBoost (Baseline)": baseline_model}, X_test, y_test, r_test, threshold=best_th_base)
     
     # Benchmark Comparison (Buy & Hold)
-    bench_ret = r_test.cumsum() # Simple cumulative log return for benchmark
-    bench_cum_ret = np.exp(bench_ret.iloc[-1]) - 1
-    bench_mdd = (bench_ret - bench_ret.cummax()).min()
+    bench_wealth = np.exp(r_test.cumsum())
+    bench_cum_ret = bench_wealth.iloc[-1] - 1
+    bench_mdd = (bench_wealth / bench_wealth.cummax() - 1).min()
     logger.info(f"Benchmark (Buy & Hold) - Cumulative Return: {bench_cum_ret:.2%}, Max DD: {bench_mdd:.2%}")
 
     # McNemar's Test (Baseline vs Always Up)
