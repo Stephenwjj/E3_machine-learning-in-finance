@@ -10,6 +10,8 @@ import numpy as np
 import matplotlib
 matplotlib.use('Agg') # Use non-interactive backend for headless environments
 import matplotlib.pyplot as plt
+import quantstats as qs
+from tabulate import tabulate
 
 # Scikit-learn imports
 from sklearn.model_selection import train_test_split, TimeSeriesSplit 
@@ -85,6 +87,31 @@ os.chdir(os.path.dirname(os.path.abspath(__file__)))
 run_time = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
 output_dir = f"log/run_{run_time}"
 os.makedirs(output_dir, exist_ok=True)
+
+def print_quantstats_summary(strat_ret, name=""):
+    """Helper function to print QuantStats summary inline for each stage."""
+    try:
+        strat_ret = strat_ret.dropna()
+        if strat_ret.index.tz is not None:
+            strat_ret.index = strat_ret.index.tz_localize(None)
+            
+        sharpe = qs.stats.sharpe(strat_ret, periods=config.ANNUAL_TRADING_PERIODS)
+        sortino = qs.stats.sortino(strat_ret, periods=config.ANNUAL_TRADING_PERIODS)
+        max_dd = qs.stats.max_drawdown(strat_ret)
+        cum_ret = qs.stats.comp(strat_ret)
+        
+        summary_df = pd.DataFrame([{
+            "Model": name,
+            "Cumulative Return": f"{cum_ret*100:.2f}%",
+            "Sharpe Ratio": round(sharpe, 3),
+            "Sortino Ratio": round(sortino, 3),
+            "Max Drawdown": f"{max_dd*100:.2f}%"
+        }])
+        print("\n--- QuantStats Summary ---")
+        print(summary_df.to_markdown(index=False))
+        print("--------------------------\n")
+    except Exception as e:
+        print(f"QuantStats summary failed for {name}: {e}")
 
 def main():
     logger = setup_logger()
