@@ -348,3 +348,32 @@ def generate_quantstats_reports(models: dict, X_test: pd.DataFrame, ret_test: pd
             periods_per_year=config.ANNUAL_TRADING_PERIODS, output=html_filename, title=f"XAUUSD H1 - {name}"
         )
         print(f"Saved: {html_filename}")
+
+def remove_redundant_features(features):
+    """
+    Remove redundant rv_ and ret_ features, keeping only the most representative one.
+    """
+    keep = []
+    rv_kept = False
+    ret_kept = False
+    
+    # Prioritize keeping rv_48 and ret_12h if they exist, otherwise keep the first encountered
+    sorted_features = sorted(features, key=lambda x: (
+        0 if x == 'rv_48' else (1 if x.startswith('rv_') else 2),
+        0 if x == 'ret_12h' else (1 if x.startswith('ret_') else 2)
+    ))
+    
+    for f in sorted_features:
+        if f.startswith('rv_'):
+            if not rv_kept:
+                keep.append(f)
+                rv_kept = True
+        elif f.startswith('ret_'):
+            if not ret_kept:
+                keep.append(f)
+                ret_kept = True
+        else:
+            keep.append(f)
+            
+    # Return in original order
+    return [f for f in features if f in keep]
