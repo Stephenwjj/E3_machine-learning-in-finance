@@ -9,11 +9,13 @@ from sklearn.metrics import roc_auc_score
 from modeling import setup_logger, config
 
 def optimize_xgb(X_train, y_train, sample_weights):
+    """Uses Optuna for XGBoost Bayesian optimization to maximize CV ROC-AUC."""
     logger = setup_logger()
     logger.info("Starting XGBoost Optuna Bayesian Optimization (Max 10 trials)...")
     tscv = TimeSeriesSplit(n_splits=5, gap=1)
     
     def objective(trial):
+        # Suggest hyperparameters for XGBoost
         param = {
             'n_estimators': trial.suggest_int('n_estimators', 100, 500, step=50),
             'max_depth': trial.suggest_int('max_depth', 3, 8),
@@ -42,11 +44,13 @@ def optimize_xgb(X_train, y_train, sample_weights):
     return study.best_params
 
 def optimize_lgbm(X_train, y_train, sample_weights):
+    """Uses Optuna for LightGBM Bayesian optimization to maximize CV ROC-AUC."""
     logger = setup_logger()
     logger.info("Starting LightGBM Optuna Bayesian Optimization (Max 10 trials)...")
     tscv = TimeSeriesSplit(n_splits=5, gap=1)
     
     def objective(trial):
+        # Suggest hyperparameters for LightGBM
         param = {
             'n_estimators': trial.suggest_int('n_estimators', 100, 500, step=50),
             'max_depth': trial.suggest_int('max_depth', 3, 8),
@@ -75,11 +79,13 @@ def optimize_lgbm(X_train, y_train, sample_weights):
     return study.best_params
 
 def optimize_cat(X_train, y_train, sample_weights):
+    """Uses Optuna for CatBoost Bayesian optimization to maximize CV ROC-AUC."""
     logger = setup_logger()
     logger.info("Starting CatBoost Optuna Bayesian Optimization (Max 10 trials)...")
     tscv = TimeSeriesSplit(n_splits=5, gap=1)
     
     def objective(trial):
+        # Suggest hyperparameters for CatBoost
         param = {
             'iterations': trial.suggest_int('iterations', 100, 500, step=50),
             'depth': trial.suggest_int('depth', 3, 8),
