@@ -188,11 +188,10 @@ def feature_selection_funnel(X: pd.DataFrame, y: pd.Series, mi_top_k: int, corr_
     keep_corr = [c for c in keep_mi if c not in drop_cols]
     logger.info(f"Filter (Correlation) retained {len(keep_corr)} features.")
 
-    # 严格遵循 PDF 第 12 页的代码：使用 StandardScaler，不使用 ColumnTransformer 避免越界
     tscv = TimeSeriesSplit(n_splits=3, gap=1)
     est = Pipeline([
         ("sc", StandardScaler()), 
-        ("clf", LogisticRegression(class_weight="balanced", solver="liblinear"))
+        ("clf", LogisticRegression(class_weight="balanced", solver="liblinear", C=0.5))
     ])
     
     rfecv = RFECV(
