@@ -229,10 +229,35 @@ def optimize_threshold_roc(y_true, y_probs):
         optimal_threshold = 1.0
     return optimal_threshold
 
-def print_oos_benchmark(models: dict, X_test: pd.DataFrame, y_test: pd.Series, ret_test: pd.Series, threshold: float = 0.5) -> pd.DataFrame:
+def print_oos_benchmark(models: dict, X_test: pd.DataFrame, y_test: pd.Series, ret_test: pd.Series, 
+                        threshold: float = 0.5, bench_ret: pd.Series = None, 
+                        stop_loss_pct: float = None, stage_name: str = "", plot_curves: bool = False) -> pd.DataFrame:
+    """
+    Unified evaluation function. Calculates metrics for models and benchmark.
+    Supports optional stop-loss application.
+    """
     results_list = []
-    fig, axes = plt.subplots(len(models), 3, figsize=(15, 5 * len(models)))
-    if len(models) == 1: axes = [axes]
+
+    # 1. Benchmark Evaluation (Buy & Hold)
+    if bench_ret is not None:
+        bench_wealth = (1 + bench_ret).cumprod()
+        bench_cum_ret = bench_wealth.iloc[-1] - 1.0
+        bench_mdd = max_drawdown(bench_wealth)
+        bench_sharpe = np.sqrt(config.ANNUAL_TRADING_PERIODS) * bench_ret.mean() / (bench_ret.std() + 1e-12) if bench_ret.std() > 0 else 0.0
+        
+        results_list.append({
+            "Model": "Benchmark (Buy & Hold)", 
+            "ROC-AUC": np.nan, "Precision": np.nan, "Recall": np.nan,
+            "F1-Score": np.nan, "MCC": np.nan,
+            "Sharpe (H1)": round(bench_sharpe, 2), 
+            "Max DD (%)": round(bench_mdd * 100, 2), 
+            "Cum Ret (%)": round(bench_cum_ret * 100, 2)
+        })
+
+    # 2. Model Evaluation
+    if plot_curves:
+        fig, axes = plt.subplots(len(models), 3, figsize=(15, 5 * len(models)))
+        if len(models) == 1: axes = [axes]
 
     for i, (name, model) in enumerate(models.items()):
         p_te = model.predict_proba(X_test)[:, 1]
@@ -244,7 +269,13 @@ def print_oos_benchmark(models: dict, X_test: pd.DataFrame, y_test: pd.Series, r
         f1 = f1_score(y_test, y_pred, zero_division=0)
         mcc = matthews_corrcoef(y_test, y_pred)
         
+        # Backtest Logic
         strat_ret = pd.Series(y_pred, index=ret_test.index).shift(1).fillna(0) * ret_test
+        
+        # Apply Stop-Loss (If specified)
+        if stop_loss_pct is not None:
+            strat_ret[strat_ret < -stop_loss_pct] = -stop_loss_pct
+            
         turnover = pd.Series(y_pred, index=ret_test.index).diff().abs().fillna(0)
         strat_ret = (strat_ret - turnover * (config.COST_BPS * 1e-4)).dropna()
 
@@ -262,25 +293,28 @@ def print_oos_benchmark(models: dict, X_test: pd.DataFrame, y_test: pd.Series, r
             "Sharpe (H1)": round(sharpe, 2), "Max DD (%)": round(mdd * 100, 2), "Cum Ret (%)": round(cum_ret * 100, 2)
         })
 
-        cm = confusion_matrix(y_test, y_pred)
-        ConfusionMatrixDisplay(cm).plot(ax=axes[i][0], colorbar=False)
-        axes[i][0].set_title(f"{name} - Confusion Matrix")
+        # Plot Curves (Only if requested to save time)
+        if plot_curves:
+            cm = confusion_matrix(y_test, y_pred)
+            ConfusionMatrixDisplay(cm).plot(ax=axes[i][0], colorbar=False)
+            axes[i][0].set_title(f"{name} - Confusion Matrix")
+            RocCurveDisplay.from_predictions(y_test, p_te, ax=axes[i][1])
+            axes[i][1].set_title(f"{name} - ROC Curve")
+            PrecisionRecallDisplay.from_predictions(y_test, p_te, ax=axes[i][2])
+            axes[i][2].set_title(f"{name} - PR Curve")
 
-        RocCurveDisplay.from_predictions(y_test, p_te, ax=axes[i][1])
-        axes[i][1].set_title(f"{name} - ROC Curve")
-
-        PrecisionRecallDisplay.from_predictions(y_test, p_te, ax=axes[i][2])
-        axes[i][2].set_title(f"{name} - PR Curve")
-
-    plt.tight_layout()
-    plt.savefig("Model_Evaluation_Curves.png", dpi=150)
-    plt.close()
+    if plot_curves:
+        plt.tight_layout()
+        plt.savefig(f"Model_Evaluation_Curves_{stage_name.replace(' ', '_')}.png", dpi=150)
+        plt.close()
     
-    print("\n" + "="*100)
-    print(f"Out-of-Sample (OOS) Benchmarking (Threshold: {threshold:.2f})")
-    print("="*100)
-    print(tabulate(results_list, headers="keys", tablefmt="pipe", stralign="center"))
-    return pd.DataFrame(results_list)
+    # Print Table
+    print("\n" + "="*115)
+    print(f"{stage_name} (Threshold: {threshold:.2f})")
+    print("="*115)
+    df_res = pd.DataFrame(results_list)
+    print(df_res.to_markdown(index=False))
+    return df_res
 
 def mcnemar_test(y_true, y_pred_model, y_pred_benchmark):
     """
