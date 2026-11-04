@@ -10,6 +10,7 @@ import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 from tabulate import tabulate
+from statsmodels.stats.contingency_tables import mcnemar
 from sklearn.feature_selection import mutual_info_classif, RFECV
 from sklearn.linear_model import LogisticRegression
 from sklearn.preprocessing import StandardScaler, RobustScaler
@@ -280,6 +281,61 @@ def print_oos_benchmark(models: dict, X_test: pd.DataFrame, y_test: pd.Series, r
     print("="*100)
     print(tabulate(results_list, headers="keys", tablefmt="pipe", stralign="center"))
     return pd.DataFrame(results_list)
+
+def mcnemar_test(y_true, y_pred_model, y_pred_benchmark):
+    """
+    Perform McNemar's test to compare two classifiers.
+    Here, the benchmark is a naive 'always predict 1' strategy.
+    """
+    # Create contingency table
+    # Table[0,0]: Both correct
+    # Table[0,1]: Model wrong, Benchmark correct
+    # Table[1,0]: Model correct, Benchmark wrong
+    # Table[1,1]: Both wrong
+    table = np.zeros((2, 2))
+    for i in range(len(y_true)):
+        if y_pred_model[i] == y_true[i] and y_pred_benchmark[i] == y_true[i]:
+            table[0, 0] += 1
+        elif y_pred_model[i] != y_true[i] and y_pred_benchmark[i] == y_true[i]:
+            table[0, 1] += 1
+        elif y_pred_model[i] == y_true[i] and y_pred_benchmark[i] != y_true[i]:
+            table[1, 0] += 1
+        else:
+            table[1, 1] += 1
+            
+    # Perform McNemar's test
+    result = mcnemar(table, exact=False, correction=True)
+    return result.statistic, result.pvalue
+
+def backtest_with_stop_loss(p_test, ret_test, threshold=0.5, stop_loss_pct=0.02):
+    """
+    Backtest with a simple fixed percentage stop-loss.
+    Since it's a vectorized backtest, we approximate the stop-loss
+    by capping the return for any single period at -stop_loss_pct.
+    """
+    signals = (p_test >= threshold).astype(int)
+    # Strategy returns: Signal(t-1) * Return(t)
+    raw_strat_ret = pd.Series(signals, index=ret_test.index).shift(1).fillna(0) * ret_test
+    turnover = pd.Series(signals, index=ret_test.index).diff().abs().fillna(0)
+    
+    # Apply stop-loss: If the raw strategy return is less than -stop_loss_pct, cap it
+    strat_ret_sl = raw_strat_ret.copy()
+    strat_ret_sl[strat_ret_sl < -stop_loss_pct] = -stop_loss_pct
+    
+    # Deduct transaction costs
+    strat_ret_sl = strat_ret_sl - turnover * (config.COST_BPS * 1e-4)
+    
+    strat_ret_sl = strat_ret_sl.dropna()
+    
+    if len(strat_ret_sl) == 0:
+        return 0.0, 0.0, 0.0
+        
+    cum_wealth = (1 + strat_ret_sl).cumprod()
+    cum_ret = cum_wealth.iloc[-1] - 1.0
+    mdd = max_drawdown(cum_wealth)
+    sharpe = np.sqrt(config.ANNUAL_TRADING_PERIODS) * strat_ret_sl.mean() / (strat_ret_sl.std() + 1e-12) if strat_ret_sl.std() > 0 else 0.0
+    
+    return cum_ret, mdd, sharpe, strat_ret_sl
 
 def generate_quantstats_reports(models: dict, X_test: pd.DataFrame, ret_test: pd.Series, bench_ret: pd.Series, threshold: float):
     if bench_ret is not None and bench_ret.index.tz is not None:
