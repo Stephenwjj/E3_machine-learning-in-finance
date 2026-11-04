@@ -179,7 +179,7 @@ def main():
     best_lgb = optimize_lgbm(X_sub_tr_s1, y_sub_train, sample_weights)
     best_cat = optimize_cat(X_sub_tr_s1, y_sub_train, sample_weights)
 
-    best_cat.pop('verbose',none)
+    best_cat.pop('verbose',None)
     best_cat['logging_level'] = 'Silent'
     
     models_tuned = {
