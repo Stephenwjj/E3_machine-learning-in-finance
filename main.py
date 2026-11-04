@@ -242,6 +242,11 @@ def main():
                                         threshold=best_th_s3, bench_ret=bench_ret, 
                                         stage_name="STAGE 3: FEATURE DEDUPLICATION", plot_curves=True)
 
+    y_pred_s2 = (models_tuned["XGBoost"].predict_proba(X_te_s1)[:, 1] >= best_th_s2).astype(int)
+    y_pred_s3 = (models_dedup["XGBoost (Dedup)"].predict_proba(X_te_s3)[:, 1] >= best_th_s3).astype(int)
+    diff_count = (y_pred_s2 != y_pred_s3).sum()
+    logger.info(f"Number of different predictions between Stage 2 and Stage 3: {diff_count} out of {len(y_test)}")
+    
     # Feature Importance Plot (Stage 3)
     plt.figure(figsize=(10, 6))
     feat_importances_dedup = pd.Series(models_dedup["XGBoost (Dedup)"].feature_importances_, index=X_te_s3.columns)
