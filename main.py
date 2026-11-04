@@ -16,7 +16,7 @@ from sklearn.model_selection import train_test_split, TimeSeriesSplit
 from sklearn.compose import ColumnTransformer
 from sklearn.preprocessing import StandardScaler, RobustScaler
 from sklearn.utils.class_weight import compute_sample_weight
-from sklearn.metrics import roc_auc_score, precision_score, recall_score, f1_score, matthews_corrcoef
+from sklearn.metrics import confusion_matrix, roc_auc_score, precision_score, recall_score, f1_score, matthews_corrcoef
 
 # Model imports
 from xgboost import XGBClassifier
