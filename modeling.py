@@ -12,8 +12,10 @@ import matplotlib.pyplot as plt
 from tabulate import tabulate
 from sklearn.feature_selection import mutual_info_classif, RFECV
 from sklearn.linear_model import LogisticRegression
+# --- 修复：正确的导入路径 ---
 from sklearn.preprocessing import StandardScaler, RobustScaler
 from sklearn.compose import ColumnTransformer
+# ---------------------------
 from sklearn.pipeline import Pipeline
 from sklearn.model_selection import TimeSeriesSplit
 from sklearn.metrics import (
@@ -203,11 +205,14 @@ def feature_selection_funnel(X: pd.DataFrame, y: pd.Series, mi_top_k: int, corr_
 
     # 3. Wrapper Method: RFECV with ColumnTransformer and RobustScaler
     outlier_features = ['macd_hist', 'rsi_14']
+    
+    # 必须基于筛选后的 X[keep_corr] 来获取数字索引
+    X_keep_corr = X[keep_corr]
+    col_idx = {c: i for i, c in enumerate(X_keep_corr.columns)}
+    
     outlier_cols = [c for c in keep_corr if c in outlier_features]
     other_cols = [c for c in keep_corr if c not in outlier_features]
 
-    # Map column names to integer indices to prevent RFECV parallel processing errors
-    col_idx = {c: i for i, c in enumerate(X.columns)}
     outlier_idx = [col_idx[c] for c in outlier_cols]
     other_idx = [col_idx[c] for c in other_cols]
 
@@ -229,8 +234,8 @@ def feature_selection_funnel(X: pd.DataFrame, y: pd.Series, mi_top_k: int, corr_
         estimator=est, step=1, cv=tscv, scoring="roc_auc",
         min_features_to_select=8, importance_getter='named_steps.clf.coef_', n_jobs=1
     )
-    rfecv.fit(X[keep_corr], y)
-    keep_wrap = X[keep_corr].columns[rfecv.support_].tolist()
+    rfecv.fit(X_keep_corr, y)
+    keep_wrap = X_keep_corr.columns[rfecv.support_].tolist()
     logger.info(f"Wrapper (RFECV) retained {len(keep_wrap)} features.")
     
     # 4. Embedded Method: L1 Regularization
