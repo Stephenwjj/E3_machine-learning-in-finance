@@ -12,7 +12,8 @@ import matplotlib.pyplot as plt
 from tabulate import tabulate
 from sklearn.feature_selection import mutual_info_classif, RFECV
 from sklearn.linear_model import LogisticRegression
-from sklearn.preprocessing import StandardScaler, RobustScaler, ColumnTransformer
+from sklearn.preprocessing import StandardScaler, RobustScaler
+from sklearn.compose import ColumnTransformer
 from sklearn.pipeline import Pipeline
 from sklearn.model_selection import TimeSeriesSplit
 from sklearn.metrics import (
