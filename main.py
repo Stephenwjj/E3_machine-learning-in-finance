@@ -178,6 +178,11 @@ def main():
     best_xgb = optimize_xgb(X_sub_tr_s1, y_sub_train, sample_weights)
     best_lgb = optimize_lgbm(X_sub_tr_s1, y_sub_train, sample_weights)
     best_cat = optimize_cat(X_sub_tr_s1, y_sub_train, sample_weights)
+
+    best_xgb['verbosity'] = 0
+    best_lgb['verbose'] = -1
+    best_cat['verbose'] = False
+    best_cat['logging_level'] = 'Silent'
     
     models_tuned = {
         "XGBoost": XGBClassifier(**best_xgb, scale_pos_weight=scale_pos_weight),
