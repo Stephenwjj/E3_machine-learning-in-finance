@@ -9,6 +9,7 @@ import numpy as np
 import matplotlib
 matplotlib.use('Agg') # Use non-interactive backend
 import matplotlib.pyplot as plt
+from tabulate import tabulate
 from sklearn.model_selection import train_test_split, TimeSeriesSplit 
 from xgboost import XGBClassifier
 from lightgbm import LGBMClassifier
@@ -264,13 +265,18 @@ def main():
     for name, model in models_tuned.items():
         p_test = model.predict_proba(X_test)[:, 1]
         cum_ret_sl, mdd_sl, sharpe_sl, _ = backtest_with_stop_loss(p_test, r_test, threshold=best_th_tuned, stop_loss_pct=0.02)
-        sl_results.append({"Model": name + " + StopLoss", "Cum Ret (%)": round(cum_ret_sl * 100, 2), "Max DD (%)": round(mdd_sl * 100, 2), "Sharpe": round(sharpe_sl, 2)})
+        sl_results.append({
+            "Model": name + " + StopLoss", 
+            "Cum Ret (%)": round(cum_ret_sl * 100, 2), 
+            "Max DD (%)": round(mdd_sl * 100, 2), 
+            "Sharpe": round(sharpe_sl, 2)
+        })
     
     df_sl = pd.DataFrame(sl_results)
     print("\n" + "="*80)
     print("IMPACT OF STOP-LOSS (2% Threshold)")
     print("="*80)
-    print(tabulate(df_sl, headers="keys", tablefmt="pipe", stralign="center"))
+    print(df_sl.to_markdown(index=False))
     
     # ==========================================
     # Save Results & Logs
