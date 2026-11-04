@@ -61,6 +61,10 @@ def main():
     # 3. Dataset Splitting (80% Train, 20% Test)
     logger.info("Splitting data into 80% Train and 20% Test...")
     X_train_full, X_test, y_train_full, y_test = train_test_split(X, y, test_size=0.2, shuffle=False)
+    gap = config.FORWARD_HOURS
+    X_train_full = X_train_full.iloc[:-gap]
+    y_train_full = y_train_full.iloc[:-gap]
+    
     r_train_full = ret_fwd.loc[X_train_full.index]
     r_test = ret_fwd.loc[X_test.index]
 
