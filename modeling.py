@@ -360,7 +360,7 @@ def backtest_with_stop_loss(p_test, ret_test, threshold=0.5, stop_loss_pct=0.02)
     
     return cum_ret, mdd, sharpe, strat_ret_sl
 
-def generate_quantstats_reports(models: dict, X_test: pd.DataFrame, ret_test: pd.Series, bench_ret: pd.Series, threshold: float):
+def generate_quantstats_reports(models: dict, X_test: pd.DataFrame, ret_test: pd.Series, bench_ret: pd.Series, threshold: float, prefix: str = ""):
     if bench_ret is not None and bench_ret.index.tz is not None:
         bench_ret.index = bench_ret.index.tz_localize(None)
 
@@ -376,7 +376,8 @@ def generate_quantstats_reports(models: dict, X_test: pd.DataFrame, ret_test: pd
         if strat_ret.index.tz is not None:
             strat_ret.index = strat_ret.index.tz_localize(None)
 
-        html_filename = f"QuantStats_Report_{name}.html"
+        # Add prefix to the filename to prevent overwriting across stages
+        html_filename = f"QuantStats_Report_{prefix}{name}.html"
         qs.reports.html(
             returns=strat_ret, benchmark=bench_ret, rf=config.RISK_FREE_RATE,
             periods_per_year=config.ANNUAL_TRADING_PERIODS, output=html_filename, title=f"XAUUSD H1 - {name}"
