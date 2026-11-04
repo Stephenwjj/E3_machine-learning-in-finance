@@ -193,8 +193,7 @@ def feature_selection_funnel(X: pd.DataFrame, y: pd.Series, mi_top_k: int, corr_
     tscv = TimeSeriesSplit(n_splits=3, gap=1)
     est = Pipeline([
         ("sc", StandardScaler()), 
-        # Reduce max_iter to match original PDF defaults, preventing over-convergence
-        ("clf", LogisticRegression(class_weight="balanced", solver="liblinear", max_iter=1000))
+        ("clf", LogisticRegression(class_weight="balanced", solver="liblinear", c=0.1))
     ])
     
     rfecv = RFECV(
