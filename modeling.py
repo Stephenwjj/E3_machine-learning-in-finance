@@ -7,15 +7,12 @@ import pandas as pd
 import yfinance as yf
 import quantstats as qs
 import matplotlib
-matplotlib.use('Agg') # Use non-interactive backend to prevent GUI errors in server environments
+matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 from tabulate import tabulate
 from sklearn.feature_selection import mutual_info_classif, RFECV
 from sklearn.linear_model import LogisticRegression
-# --- 修复：正确的导入路径 ---
 from sklearn.preprocessing import StandardScaler, RobustScaler
-from sklearn.compose import ColumnTransformer
-# ---------------------------
 from sklearn.pipeline import Pipeline
 from sklearn.model_selection import TimeSeriesSplit
 from sklearn.metrics import (
@@ -24,13 +21,11 @@ from sklearn.metrics import (
     PrecisionRecallDisplay, RocCurveDisplay
 )
 
-# Suppress warnings for clean output
 warnings.filterwarnings("ignore")
 logging.getLogger('matplotlib.font_manager').setLevel(logging.ERROR)
 logging.getLogger('matplotlib').setLevel(logging.ERROR)
 
 class Config:
-    """Configuration class to store global parameters."""
     FILE_PATH = 'data/XAUUSD_H1_202001020100_202606302300.csv'
     FORWARD_HOURS = 12
     COST_BPS = 4.0
@@ -51,28 +46,23 @@ class Config:
 config = Config()
 
 def setup_logger():
-    """Sets up a production-grade logging system."""
     logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
     return logging.getLogger(__name__)
 
 def calculate_log_returns(series: pd.Series, n: int = 1) -> pd.Series:
-    """Calculates n-period log returns."""
     return np.log(series / series.shift(n))
 
 def calculate_zscore(series: pd.Series, window: int) -> pd.Series:
-    """Calculates rolling Z-score."""
     mean = series.rolling(window).mean()
     std = series.rolling(window).std()
     return (series - mean) / (std + 1e-12)
 
 def max_drawdown(cum_wealth: pd.Series) -> float:
-    """Calculates the maximum drawdown from a cumulative wealth series."""
     rolling_max = cum_wealth.cummax()
     drawdown = (cum_wealth / rolling_max) - 1.0
     return drawdown.min()
 
 def load_and_merge_data(file_path: str, logger) -> pd.DataFrame:
-    """Loads local OHLC data and merges it with macro indicators (DXY, US10Y, VIX)."""
     try:
         df = pd.read_csv(file_path, sep='\t')
         df.columns = df.columns.str.strip('<>')
@@ -88,7 +78,6 @@ def load_and_merge_data(file_path: str, logger) -> pd.DataFrame:
     end_date = df.index.max().strftime('%Y-%m-%d')
     
     try:
-        # Download macro data and shift by 1 to prevent look-ahead bias
         macro = yf.download(['DX-Y.NYB', '^TNX', '^VIX'], start=start_date, end=end_date, progress=False)['Close']
         macro.columns = ['dxy', 'us10y', 'vix']
         macro = macro.shift(1).resample('h').ffill()
@@ -101,13 +90,11 @@ def load_and_merge_data(file_path: str, logger) -> pd.DataFrame:
     return df
 
 def create_features(df: pd.DataFrame, fwd_h: int, cost_bps: float, vol_mult: float) -> tuple[pd.DataFrame, pd.Series]:
-    """Generates a comprehensive feature pool and dynamically labeled targets."""
     o, h, l, c, v = df["open"], df["high"], df["low"], df["close"], df["tickvol"]
     r = calculate_log_returns(c, 1)
     tp = (h + l + c) / 3.0
     f = pd.DataFrame(index=df.index)    
     
-    # 1. Technical Indicators
     delta = c.diff()
     gain = delta.clip(lower=0).ewm(alpha=1/14, adjust=False).mean()
     loss = -delta.clip(upper=0).ewm(alpha=1/14, adjust=False).mean()
@@ -121,7 +108,6 @@ def create_features(df: pd.DataFrame, fwd_h: int, cost_bps: float, vol_mult: flo
     f['bb_width'] = (4 * sd20) / (ma20 + 1e-12)
     f['bb_pos'] = (c - (ma20 - 2*sd20)) / (4*sd20 + 1e-12)
 
-    # 2. Momentum & Volatility
     for n in [1, 4, 8, 12, 24, 48, 72, 120]:
         f[f"ret_{n}h"] = calculate_log_returns(c, n)
     f["lag1_autocorr_6"] = r.rolling(6).apply(lambda x: pd.Series(x).autocorr(1), raw=False)
@@ -138,7 +124,6 @@ def create_features(df: pd.DataFrame, fwd_h: int, cost_bps: float, vol_mult: flo
     f["atr_ratio_6_48"] = tr.ewm(span=6, adjust=False).mean() / (tr.ewm(span=48, adjust=False).mean() + 1e-12)
     f["bb_squeeze"] = f["bb_width"].rolling(48).apply(lambda x: (x[-1] - x.min()) / (x.max() - x.min() + 1e-12), raw=True)
     
-    # 3. Volume & Price Action
     f["volume_zscore_24"] = calculate_zscore(v, 24)
     f["price_volume_corr_12"] = r.rolling(12).corr(v.pct_change())
 
@@ -150,8 +135,13 @@ def create_features(df: pd.DataFrame, fwd_h: int, cost_bps: float, vol_mult: flo
     f["body_ratio"] = ((c - o).abs() / (h - l + 1e-12))
     f["upper_shadow"] = (h - np.maximum(o, c)) / (h - l + 1e-12)
     f["lower_shadow"] = (np.minimum(o, c) - l) / (h - l + 1e-12)
+
+    # 补全 PDF 第 10 页缺失的 spread_zscore 特征
+    if 'spread' in df.columns:
+        s_mean = df['spread'].rolling(24).mean()
+        s_std = df['spread'].rolling(24).std()
+        f["spread_zscore"] = (df['spread'] - s_mean) / (s_std + 1e-12)
     
-    # 4. Macro Features
     if 'dxy' in df.columns:
         for n in [1, 8, 24]:
             f[f"dxy_chg_{n}h"] = calculate_log_returns(df['dxy'], n)
@@ -161,11 +151,9 @@ def create_features(df: pd.DataFrame, fwd_h: int, cost_bps: float, vol_mult: flo
         f["nlp_fear_sentiment"] = (f["vix_chg_8h"] - f["dxy_chg_8h"]) / 2.0
         f["nlp_sentiment_smooth"] = f["nlp_fear_sentiment"].rolling(4).mean()
 
-    # 5. Event Driven (NFP Hour)
     is_first_friday = (df.index.dayofweek == 4) & (df.index.day <= 7)
     f["is_nfp_hour"] = (is_first_friday & (df.index.hour.isin([12, 13]))).astype(int)
        
-    # 6. Dynamic Volatility Labeling (Shift X to avoid look-ahead bias)
     X = f.shift(1)
     y_raw = np.log(c.shift(-fwd_h) / c)
     cost = cost_bps * 1e-4
@@ -178,16 +166,13 @@ def create_features(df: pd.DataFrame, fwd_h: int, cost_bps: float, vol_mult: flo
     return data.drop(columns=["Label"]), data["Label"]
 
 def feature_selection_funnel(X: pd.DataFrame, y: pd.Series, mi_top_k: int, corr_thresh: float, l1_c: float, logger) -> list:
-    """Executes a three-tier feature selection funnel (MI, Correlation, RFECV, L1)."""
     logger.info(f"Starting feature selection. Initial features: {X.shape[1]}")
     
-    # 1. Filter Method: Mutual Information
     mi = mutual_info_classif(X, y, random_state=2026)
     mi_s = pd.Series(mi, index=X.columns).sort_values(ascending=False)
     keep_mi = mi_s.head(mi_top_k).index.tolist()
     logger.info(f"Filter (MI) retained {len(keep_mi)} features.")
     
-    # 2. Filter Method: Correlation Pruning
     X_mi = X[keep_mi]
     corr_matrix = X_mi.corr().abs()
     upper = corr_matrix.where(np.triu(np.ones(corr_matrix.shape), k=1).astype(bool))
@@ -203,9 +188,7 @@ def feature_selection_funnel(X: pd.DataFrame, y: pd.Series, mi_top_k: int, corr_
     keep_corr = [c for c in keep_mi if c not in drop_cols]
     logger.info(f"Filter (Correlation) retained {len(keep_corr)} features.")
 
-    # 3. Wrapper Method: RFECV (Exactly matches PDF Page 12)
-    # Note: Using ColumnTransformer here causes IndexErrors because RFECV 
-    # removes features iteratively, breaking fixed column indices.
+    # 严格遵循 PDF 第 12 页的代码：使用 StandardScaler，不使用 ColumnTransformer 避免越界
     tscv = TimeSeriesSplit(n_splits=3, gap=1)
     est = Pipeline([
         ("sc", StandardScaler()), 
@@ -220,7 +203,6 @@ def feature_selection_funnel(X: pd.DataFrame, y: pd.Series, mi_top_k: int, corr_
     keep_wrap = X[keep_corr].columns[rfecv.support_].tolist()
     logger.info(f"Wrapper (RFECV) retained {len(keep_wrap)} features.")
     
-    # 4. Embedded Method: L1 Regularization (Exactly matches PDF Page 12)
     X_scaled = StandardScaler().fit_transform(X[keep_wrap])
     l1_model = LogisticRegression(penalty='l1', solver='liblinear', C=l1_c, class_weight='balanced', max_iter=2000)
     l1_model.fit(X_scaled, y)
@@ -232,7 +214,6 @@ def feature_selection_funnel(X: pd.DataFrame, y: pd.Series, mi_top_k: int, corr_
     return final_feats
 
 def optimize_threshold_roc(y_true, y_probs):
-    """Finds the optimal threshold using Youden's J statistic."""
     fpr, tpr, thresholds = roc_curve(y_true, y_probs)
     optimal_idx = np.argmax(tpr - fpr)
     optimal_threshold = thresholds[optimal_idx]
@@ -241,10 +222,7 @@ def optimize_threshold_roc(y_true, y_probs):
     return optimal_threshold
 
 def print_oos_benchmark(models: dict, X_test: pd.DataFrame, y_test: pd.Series, ret_test: pd.Series, threshold: float = 0.5) -> pd.DataFrame:
-    """Evaluates OOS performance, prints a summary table, and generates evaluation plots."""
     results_list = []
-    
-    # Setup subplots for Confusion Matrix, ROC, and PR curves
     fig, axes = plt.subplots(len(models), 3, figsize=(15, 5 * len(models)))
     if len(models) == 1: axes = [axes]
 
@@ -252,14 +230,12 @@ def print_oos_benchmark(models: dict, X_test: pd.DataFrame, y_test: pd.Series, r
         p_te = model.predict_proba(X_test)[:, 1]
         y_pred = (p_te >= threshold).astype(int)
         
-        # Calculate Classification Metrics
         auc_roc = roc_auc_score(y_test, p_te)
         precision = precision_score(y_test, y_pred, zero_division=0)
         recall = recall_score(y_test, y_pred, zero_division=0)
         f1 = f1_score(y_test, y_pred, zero_division=0)
         mcc = matthews_corrcoef(y_test, y_pred)
         
-        # Calculate Backtest Metrics (with 1-step shift and transaction costs)
         strat_ret = pd.Series(y_pred, index=ret_test.index).shift(1).fillna(0) * ret_test
         turnover = pd.Series(y_pred, index=ret_test.index).diff().abs().fillna(0)
         strat_ret = (strat_ret - turnover * (config.COST_BPS * 1e-4)).dropna()
@@ -278,16 +254,13 @@ def print_oos_benchmark(models: dict, X_test: pd.DataFrame, y_test: pd.Series, r
             "Sharpe (H1)": round(sharpe, 2), "Max DD (%)": round(mdd * 100, 2), "Cum Ret (%)": round(cum_ret * 100, 2)
         })
 
-        # Plotting: Confusion Matrix
         cm = confusion_matrix(y_test, y_pred)
         ConfusionMatrixDisplay(cm).plot(ax=axes[i][0], colorbar=False)
         axes[i][0].set_title(f"{name} - Confusion Matrix")
 
-        # Plotting: ROC Curve
         RocCurveDisplay.from_predictions(y_test, p_te, ax=axes[i][1])
         axes[i][1].set_title(f"{name} - ROC Curve")
 
-        # Plotting: PR Curve
         PrecisionRecallDisplay.from_predictions(y_test, p_te, ax=axes[i][2])
         axes[i][2].set_title(f"{name} - PR Curve")
 
@@ -302,7 +275,6 @@ def print_oos_benchmark(models: dict, X_test: pd.DataFrame, y_test: pd.Series, r
     return pd.DataFrame(results_list)
 
 def generate_quantstats_reports(models: dict, X_test: pd.DataFrame, ret_test: pd.Series, bench_ret: pd.Series, threshold: float):
-    """Generates HTML performance reports using QuantStats."""
     if bench_ret is not None and bench_ret.index.tz is not None:
         bench_ret.index = bench_ret.index.tz_localize(None)
 
