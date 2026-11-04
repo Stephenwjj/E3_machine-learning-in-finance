@@ -179,15 +179,13 @@ def main():
     best_lgb = optimize_lgbm(X_sub_tr_s1, y_sub_train, sample_weights)
     best_cat = optimize_cat(X_sub_tr_s1, y_sub_train, sample_weights)
 
-    best_xgb['verbosity'] = 0
-    best_lgb['verbose'] = -1
-    best_cat['verbose'] = False
+    best_cat.pop('verbose',none)
     best_cat['logging_level'] = 'Silent'
     
     models_tuned = {
         "XGBoost": XGBClassifier(**best_xgb, scale_pos_weight=scale_pos_weight),
         "LightGBM": LGBMClassifier(**best_lgb, scale_pos_weight=scale_pos_weight),
-        "CatBoost": CatBoostClassifier(**best_cat, scale_pos_weight=scale_pos_weight)
+        "CatBoost": CatBoostClassifier(**best_cat, scale_pos_weight=scale_pos_weight,verbose=False)
     }
     for model in models_tuned.values():
         model.fit(X_sub_tr_s1, y_sub_train)
