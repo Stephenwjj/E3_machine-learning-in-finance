@@ -139,6 +139,10 @@ def main():
     
     r_train_full = ret_fwd.loc[X_train_full.index]
     r_test_log = ret_fwd.loc[X_test.index]
+
+    bench_wealth = np.exp(r_test.cumsum())
+    bench_pct_ret = bench_wealth.pct_change().dropna()
+    bench_ret_aligned = bench_pct_ret.tz_localize(None) if bench_pct_ret.index.tz is not None else bench_pct_ret
     
     # Convert to simple returns for benchmark and backtest
     r_test = np.exp(r_test_log) - 1
