@@ -12,3 +12,4 @@ optuna
 quantstats
 tabulate
 matplotlib
+statsmodels
