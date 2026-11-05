@@ -8,8 +8,9 @@ from sklearn.model_selection import TimeSeriesSplit
 from sklearn.metrics import roc_auc_score
 from modeling import setup_logger, config
 
+# Hyperparameter Optimization via Optuna
+# Uses Optuna for XGBoost Bayesian optimization to maximize CV ROC-AUC
 def optimize_xgb(X_train, y_train, sample_weights):
-    """Uses Optuna for XGBoost Bayesian optimization to maximize CV ROC-AUC."""
     logger = setup_logger()
     logger.info("Starting XGBoost Optuna Bayesian Optimization ...")
     tscv = TimeSeriesSplit(n_splits=3, gap=1)
@@ -28,6 +29,7 @@ def optimize_xgb(X_train, y_train, sample_weights):
         }
         model = XGBClassifier(**param)
         cv_scores = []
+        # Cross-validation 
         for train_idx, val_idx in tscv.split(X_train):
             X_tr, X_val = X_train.iloc[train_idx], X_train.iloc[val_idx]
             y_tr, y_val = y_train.iloc[train_idx], y_train.iloc[val_idx]
@@ -37,14 +39,15 @@ def optimize_xgb(X_train, y_train, sample_weights):
             cv_scores.append(roc_auc_score(y_val, preds))
         return np.mean(cv_scores)
 
+    # Run optimization study
     optuna.logging.set_verbosity(optuna.logging.WARNING)
     study = optuna.create_study(direction='maximize')
     study.optimize(objective, n_trials=5)
     logger.info(f"XGB Best Trial ROC-AUC: {study.best_value:.4f}")
     return study.best_params
 
+# Uses Optuna for LightGBM Bayesian optimization to maximize CV ROC-AUC
 def optimize_lgbm(X_train, y_train, sample_weights):
-    """Uses Optuna for LightGBM Bayesian optimization to maximize CV ROC-AUC."""
     logger = setup_logger()
     logger.info("Starting LightGBM Optuna Bayesian Optimization ...")
     tscv = TimeSeriesSplit(n_splits=3, gap=1)
@@ -63,6 +66,7 @@ def optimize_lgbm(X_train, y_train, sample_weights):
         }
         model = LGBMClassifier(**param)
         cv_scores = []
+        # Cross-validation
         for train_idx, val_idx in tscv.split(X_train):
             X_tr, X_val = X_train.iloc[train_idx], X_train.iloc[val_idx]
             y_tr, y_val = y_train.iloc[train_idx], y_train.iloc[val_idx]
@@ -71,15 +75,16 @@ def optimize_lgbm(X_train, y_train, sample_weights):
             preds = model.predict_proba(X_val)[:, 1]
             cv_scores.append(roc_auc_score(y_val, preds))
         return np.mean(cv_scores)
-
+    
+    # Run optimization study
     optuna.logging.set_verbosity(optuna.logging.WARNING)
     study = optuna.create_study(direction='maximize')
     study.optimize(objective, n_trials=5)
     logger.info(f"LGBM Best Trial ROC-AUC: {study.best_value:.4f}")
     return study.best_params
 
+# Uses Optuna for CatBoost Bayesian optimization to maximize CV ROC-AUC
 def optimize_cat(X_train, y_train, sample_weights):
-    """Uses Optuna for CatBoost Bayesian optimization to maximize CV ROC-AUC."""
     logger = setup_logger()
     logger.info("Starting CatBoost Optuna Bayesian Optimization ...")
     tscv = TimeSeriesSplit(n_splits=3, gap=1)
@@ -95,6 +100,7 @@ def optimize_cat(X_train, y_train, sample_weights):
         }
         model = CatBoostClassifier(**param)
         cv_scores = []
+        # Cross-validation
         for train_idx, val_idx in tscv.split(X_train):
             X_tr, X_val = X_train.iloc[train_idx], X_train.iloc[val_idx]
             y_tr, y_val = y_train.iloc[train_idx], y_train.iloc[val_idx]
@@ -104,6 +110,7 @@ def optimize_cat(X_train, y_train, sample_weights):
             cv_scores.append(roc_auc_score(y_val, preds))
         return np.mean(cv_scores)
 
+    # Run optimization study
     optuna.logging.set_verbosity(optuna.logging.WARNING)
     study = optuna.create_study(direction='maximize')
     study.optimize(objective, n_trials=5)
