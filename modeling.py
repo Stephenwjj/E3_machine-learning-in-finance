@@ -9,7 +9,6 @@ import quantstats as qs
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
-from tabulate import tabulate
 from statsmodels.stats.contingency_tables import mcnemar
 from sklearn.feature_selection import mutual_info_classif, RFECV
 from sklearn.linear_model import LogisticRegression
@@ -26,6 +25,7 @@ warnings.filterwarnings("ignore")
 logging.getLogger('matplotlib.font_manager').setLevel(logging.ERROR)
 logging.getLogger('matplotlib').setLevel(logging.ERROR)
 
+# global configuration of parameters and constants
 class Config:
     FILE_PATH = 'data/XAUUSD_H1_202001020100_202606302300.csv'
     FORWARD_HOURS = 12
@@ -33,6 +33,7 @@ class Config:
     VOL_MULTIPLIER = 1.0
     TRAIN_RATIO = 0.6
     VAL_RATIO = 0.2
+    # define the 3 model parameters
     MODEL_PARAMS = {
         "XGBoost": {"n_estimators": 200, "max_depth": 4, "learning_rate": 0.03, "tree_method": "hist", "random_state": 2026},
         "LightGBM": {"n_estimators": 200, "num_leaves": 15, "learning_rate": 0.03, "random_state": 2026, "verbose": -1},
@@ -46,23 +47,28 @@ class Config:
 
 config = Config()
 
+# Configures and returns a standardized logging object
 def setup_logger():
     logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
     return logging.getLogger(__name__)
 
+# Calculates n-period logarithmic returns for a given price series
 def calculate_log_returns(series: pd.Series, n: int = 1) -> pd.Series:
     return np.log(series / series.shift(n))
 
+# Calculates the rolling Z-score to standardize a series over a given window
 def calculate_zscore(series: pd.Series, window: int) -> pd.Series:
     mean = series.rolling(window).mean()
     std = series.rolling(window).std()
     return (series - mean) / (std + 1e-12)
 
+# Calculates the Maximum Drawdown (MDD) from a cumulative wealth curve
 def max_drawdown(cum_wealth: pd.Series) -> float:
     rolling_max = cum_wealth.cummax()
     drawdown = (cum_wealth / rolling_max) - 1.0
     return drawdown.min()
 
+# Data Loading & Feature Engineering
 def load_and_merge_data(file_path: str, logger) -> pd.DataFrame:
     try:
         df = pd.read_csv(file_path, sep='\t')
@@ -78,6 +84,7 @@ def load_and_merge_data(file_path: str, logger) -> pd.DataFrame:
     start_date = df.index.min().strftime('%Y-%m-%d')
     end_date = df.index.max().strftime('%Y-%m-%d')
     
+    # Fetch and merge macro data
     try:
         macro = yf.download(['DX-Y.NYB', '^TNX', '^VIX'], start=start_date, end=end_date, progress=False)['Close']
         macro.columns = ['dxy', 'us10y', 'vix']
@@ -90,12 +97,14 @@ def load_and_merge_data(file_path: str, logger) -> pd.DataFrame:
         logger.warning(f"Macro data download failed: {e}.")
     return df
 
+# create features for training
 def create_features(df: pd.DataFrame, fwd_h: int, cost_bps: float, vol_mult: float) -> tuple[pd.DataFrame, pd.Series]:
     o, h, l, c, v = df["open"], df["high"], df["low"], df["close"], df["tickvol"]
     r = calculate_log_returns(c, 1)
     tp = (h + l + c) / 3.0
     f = pd.DataFrame(index=df.index)    
     
+    # 1. Technical Indicators (RSI, MACD, Bollinger Bands)
     delta = c.diff()
     gain = delta.clip(lower=0).ewm(alpha=1/14, adjust=False).mean()
     loss = -delta.clip(upper=0).ewm(alpha=1/14, adjust=False).mean()
@@ -109,11 +118,13 @@ def create_features(df: pd.DataFrame, fwd_h: int, cost_bps: float, vol_mult: flo
     f['bb_width'] = (4 * sd20) / (ma20 + 1e-12)
     f['bb_pos'] = (c - (ma20 - 2*sd20)) / (4*sd20 + 1e-12)
 
+    # 2. Momentum & Autocorrelation Features
     for n in [1, 4, 8, 12, 24, 48, 72, 120]:
         f[f"ret_{n}h"] = calculate_log_returns(c, n)
     f["lag1_autocorr_6"] = r.rolling(6).apply(lambda x: pd.Series(x).autocorr(1), raw=False)
     f["lag1_autocorr_24"] = r.rolling(24).apply(lambda x: pd.Series(x).autocorr(1), raw=False)
 
+    # 3. Trend & Volatility Features
     f["donchian_pos_20"] = (c - c.rolling(20).min()) / (c.rolling(20).max() - c.rolling(20).min() + 1e-12)
     f["donchian_pos_48"] = (c - c.rolling(48).min()) / (c.rolling(48).max() - c.rolling(48).min() + 1e-12)
     
@@ -125,6 +136,7 @@ def create_features(df: pd.DataFrame, fwd_h: int, cost_bps: float, vol_mult: flo
     f["atr_ratio_6_48"] = tr.ewm(span=6, adjust=False).mean() / (tr.ewm(span=48, adjust=False).mean() + 1e-12)
     f["bb_squeeze"] = f["bb_width"].rolling(48).apply(lambda x: (x[-1] - x.min()) / (x.max() - x.min() + 1e-12), raw=True)
     
+    # 4. Volume & Price Action Features
     f["volume_zscore_24"] = calculate_zscore(v, 24)
     f["price_volume_corr_12"] = r.rolling(12).corr(v.pct_change())
 
@@ -141,7 +153,8 @@ def create_features(df: pd.DataFrame, fwd_h: int, cost_bps: float, vol_mult: flo
         s_mean = df['spread'].rolling(24).mean()
         s_std = df['spread'].rolling(24).std()
         f["spread_zscore"] = (df['spread'] - s_mean) / (s_std + 1e-12)
-    
+   
+    # 5. Macro & Sentiment Features
     if 'dxy' in df.columns:
         for n in [1, 8, 24]:
             f[f"dxy_chg_{n}h"] = calculate_log_returns(df['dxy'], n)
@@ -151,9 +164,11 @@ def create_features(df: pd.DataFrame, fwd_h: int, cost_bps: float, vol_mult: flo
         f["nlp_fear_sentiment"] = (f["vix_chg_8h"] - f["dxy_chg_8h"]) / 2.0
         f["nlp_sentiment_smooth"] = f["nlp_fear_sentiment"].rolling(4).mean()
 
+    # 6. Event-based Feature (NFP)
     is_first_friday = (df.index.dayofweek == 4) & (df.index.day <= 7)
     f["is_nfp_hour"] = (is_first_friday & (df.index.hour.isin([12, 13]))).astype(int)
-       
+
+    # 7. Label Generation (Shifted to prevent look-ahead bias) 
     X = f.shift(1)
     y_raw = np.log(c.shift(-fwd_h) / c)
     cost = cost_bps * 1e-4
@@ -165,6 +180,7 @@ def create_features(df: pd.DataFrame, fwd_h: int, cost_bps: float, vol_mult: flo
     data = X.join(y).replace([np.inf, -np.inf], np.nan).dropna()
     return data.drop(columns=["Label"]), data["Label"]
 
+# Feature Selection Pipeline
 def feature_selection_funnel(X: pd.DataFrame, y: pd.Series, mi_top_k: int, corr_thresh: float, l1_c: float, logger) -> list:
     logger.info(f"Starting feature selection. Initial features: {X.shape[1]}")
     
@@ -205,14 +221,10 @@ def feature_selection_funnel(X: pd.DataFrame, y: pd.Series, mi_top_k: int, corr_
     keep_wrap = X[keep_corr].columns[rfecv.support_].tolist()
     logger.info(f"Wrapper (RFECV) retained {len(keep_wrap)} features.")
     
-    # 4. L1 Regularization
+    # 4. L1 Regularization (Embedded Method)
     X_scaled = StandardScaler().fit_transform(X[keep_wrap])
     
-    # PDF Fix: The original C=0.1 in PDF was sufficient for older sklearn versions. 
-    # In newer versions, the model is more robust. We increase the L1 penalty 
-    # (by lowering C to 0.02) to force the algorithm to naturally prune redundant features 
-    # and align with the 12 features reported in the PDF.
-    l1_model = LogisticRegression(penalty='l1', solver='liblinear', C=0.02, class_weight='balanced', max_iter=2000)
+    l1_model = LogisticRegression(penalty='l1', solver='liblinear', C=0.01, class_weight='balanced', max_iter=2000)
     l1_model.fit(X_scaled, y)
     
     final_feats = [c for c, w in zip(keep_wrap, l1_model.coef_[0]) if abs(w) > 1e-6]
@@ -221,6 +233,8 @@ def feature_selection_funnel(X: pd.DataFrame, y: pd.Series, mi_top_k: int, corr_
     
     return final_feats
 
+# Evaluation & Backtesting Utilities
+# Finds the optimal probability threshold by maximizing Youden's J statistic (TPR - FPR)
 def optimize_threshold_roc(y_true, y_probs):
     fpr, tpr, thresholds = roc_curve(y_true, y_probs)
     optimal_idx = np.argmax(tpr - fpr)
@@ -233,8 +247,8 @@ def print_oos_benchmark(models: dict, X_test: pd.DataFrame, y_test: pd.Series, r
                         threshold: float = 0.5, bench_ret: pd.Series = None, 
                         stop_loss_pct: float = None, stage_name: str = "", plot_curves: bool = False) -> pd.DataFrame:
     """
-    Unified evaluation function. Calculates metrics for models and benchmark.
-    Supports optional stop-loss application.
+    Evaluates models out-of-sample. Calculates classification metrics, applies non-overlapping 
+    backtesting logic, and prints a comparison table against a benchmark.
     """
     results_list = []
 
@@ -254,7 +268,7 @@ def print_oos_benchmark(models: dict, X_test: pd.DataFrame, y_test: pd.Series, r
             "Cum Ret (%)": round(bench_cum_ret * 100, 2)
         })
 
-    # 2. Model Evaluation
+    # 2. Model Evaluation & Plot Initialization
     if plot_curves:
         fig, axes = plt.subplots(len(models), 3, figsize=(15, 5 * len(models)))
         if len(models) == 1: axes = [axes]
@@ -269,15 +283,23 @@ def print_oos_benchmark(models: dict, X_test: pd.DataFrame, y_test: pd.Series, r
         f1 = f1_score(y_test, y_pred, zero_division=0)
         mcc = matthews_corrcoef(y_test, y_pred)
         
-        # Backtest Logic
-        strat_ret = pd.Series(y_pred, index=ret_test.index).shift(1).fillna(0) * ret_test
+        # 3. Backtest Logic (Non-overlapping 12-hour sampling) 
+        signals = pd.Series(y_pred, index=ret_test.index).shift(1).fillna(0)
         
-        # Apply Stop-Loss (If specified)
+        signals_non_overlap = signals.iloc[::12]
+        ret_test_non_overlap = ret_test.iloc[::12]
+        
+        strat_ret = signals_non_overlap * ret_test_non_overlap
+        
+        # Apply Stop-Loss
         if stop_loss_pct is not None:
             strat_ret[strat_ret < -stop_loss_pct] = -stop_loss_pct
             
-        turnover = pd.Series(y_pred, index=ret_test.index).diff().abs().fillna(0)
+        turnover = signals_non_overlap.diff().abs().fillna(0)
         strat_ret = (strat_ret - turnover * (config.COST_BPS * 1e-4)).dropna()
+
+        # 4. Trade Count & Performance Calculation
+        trade_count = int((signals_non_overlap.diff() == 1).sum())
 
         if len(strat_ret) == 0:
             cum_ret, mdd, sharpe = 0.0, 0.0, 0.0
@@ -290,10 +312,11 @@ def print_oos_benchmark(models: dict, X_test: pd.DataFrame, y_test: pd.Series, r
         results_list.append({
             "Model": name, "ROC-AUC": round(auc_roc, 4), "Precision": round(precision, 4),
             "Recall": round(recall, 4), "F1-Score": round(f1, 4), "MCC": round(mcc, 4),
+            "Trades": trade_count,
             "Sharpe (H1)": round(sharpe, 2), "Max DD (%)": round(mdd * 100, 2), "Cum Ret (%)": round(cum_ret * 100, 2)
         })
 
-        # Plot Curves (Only if requested to save time)
+        # 5. Generate Evaluation Curves 
         if plot_curves:
             cm = confusion_matrix(y_test, y_pred)
             ConfusionMatrixDisplay(cm).plot(ax=axes[i][0], colorbar=False)
@@ -308,7 +331,7 @@ def print_oos_benchmark(models: dict, X_test: pd.DataFrame, y_test: pd.Series, r
         plt.savefig(f"Model_Evaluation_Curves_{stage_name.replace(' ', '_')}.png", dpi=150)
         plt.close()
     
-    # Print Table
+    # 6. Print Formatted Table
     print("\n" + "="*115)
     print(f"{stage_name} (Threshold: {threshold:.2f})")
     print("="*115)
@@ -316,6 +339,7 @@ def print_oos_benchmark(models: dict, X_test: pd.DataFrame, y_test: pd.Series, r
     print(df_res.to_markdown(index=False))
     return df_res
 
+# Perform McNemar's test to compare the predictions of two classifiers for statistical significance.
 def mcnemar_test(y_true, y_pred_model, y_pred_benchmark):
     """
     Perform McNemar's test to compare two classifiers.
@@ -334,6 +358,7 @@ def mcnemar_test(y_true, y_pred_model, y_pred_benchmark):
     result = mcnemar(table, exact=False, correction=True)
     return result.statistic, result.pvalue
 
+# Standalone backtest function with fixed percentage stop-loss. Returns
 def backtest_with_stop_loss(p_test, ret_test, threshold=0.5, stop_loss_pct=0.02):
     """
     Backtest with a simple fixed percentage stop-loss.
@@ -360,6 +385,7 @@ def backtest_with_stop_loss(p_test, ret_test, threshold=0.5, stop_loss_pct=0.02)
     
     return cum_ret, mdd, sharpe, strat_ret_sl
 
+# Generates QuantStats HTML reports for each model using non-overlapping 12-hour returns
 def generate_quantstats_reports(models: dict, X_test: pd.DataFrame, ret_test: pd.Series, bench_ret: pd.Series, threshold: float, prefix: str = ""):
     if bench_ret is not None and bench_ret.index.tz is not None:
         bench_ret.index = bench_ret.index.tz_localize(None)
@@ -368,10 +394,14 @@ def generate_quantstats_reports(models: dict, X_test: pd.DataFrame, ret_test: pd
         p_te = model.predict_proba(X_test)[:, 1]
         sig_te = (p_te >= threshold).astype(int)
 
-        strat_ret = pd.Series(sig_te, index=ret_test.index).shift(1).fillna(0) * ret_test
-        turnover = pd.Series(sig_te, index=ret_test.index).diff().abs().fillna(0)
+        # Apply non-overlapping 12h sampling
+        signals = pd.Series(sig_te, index=ret_test.index).shift(1).fillna(0)
+        signals_non_overlap = signals.iloc[::12]
+        ret_test_non_overlap = ret_test.iloc[::12]
+        
+        strat_ret = signals_non_overlap * ret_test_non_overlap
+        turnover = signals_non_overlap.diff().abs().fillna(0)
         strat_ret = (strat_ret - turnover * (config.COST_BPS * 1e-4)).dropna()
-        strat_ret.name = f"{name} Strategy"
         
         if strat_ret.index.tz is not None:
             strat_ret.index = strat_ret.index.tz_localize(None)
@@ -384,6 +414,7 @@ def generate_quantstats_reports(models: dict, X_test: pd.DataFrame, ret_test: pd
         )
         print(f"Saved: {html_filename}")
 
+# Multicollinearity Deduplication
 def remove_redundant_features(features):
     """
     Remove redundant rv_ and ret_ features, keeping only the most representative one.
