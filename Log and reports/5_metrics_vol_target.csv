@@ -1,5 +1,0 @@
-Model,ROC-AUC,Precision,Recall,F1-Score,MCC,Sharpe (H1),Max DD (%),Cum Ret (%)
-Benchmark (Buy & Hold),,,,,,3.52,-98.05,3460.88
-XGBoost (Dedup) + VolTarget,0.5571,0.3132,0.3814,0.3439,0.0782,8.57,-16.72,164.34
-LightGBM (Dedup) + VolTarget,0.5494,0.3013,0.5301,0.3842,0.0806,8.82,-23.02,226.95
-CatBoost (Dedup) + VolTarget,0.5508,0.2954,0.5674,0.3886,0.0743,8.72,-27.43,239.16
