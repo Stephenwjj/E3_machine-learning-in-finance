@@ -3,20 +3,16 @@ data tracking link below for the Code Repository, project running log and report
 https://github.com/Stephenwjj/E3_machine-learning-in-finance
 
 
-# Run the E3_project online in Colab with the belowing code
-# 1. Clean up old directory and return to root
+## Run the E3_project online in Colab with the belowing code
+
 %cd /content
 !rm -rf E3_machine-learning-in-finance
 
-# 2. Clone the latest repository
 !git clone https://github.com/Stephenwjj/E3_machine-learning-in-finance.git
 %cd E3_machine-learning-in-finance
 
-# 3. Configure Git identity
 !git config --global user.name "Stephenwjj"
 !git config --global user.email "wjjdhu@126.com"
 
-# 4. Install dependencies and run main.py
-# (This will automatically generate the log/run_xxx folder in the current directory)
 !pip install -q -r requirements.txt
 !python main.py
