@@ -112,18 +112,21 @@ def main():
     r_test_log = ret_fwd.loc[X_test.index]
 
     # Benchmark calculation (Buy & Hold)
-    bench_wealth = np.exp(r_test_log.cumsum())
-    bench_pct_ret = bench_wealth.pct_change().dropna()
-    bench_ret_aligned = bench_pct_ret.tz_localize(None) if bench_pct_ret.index.tz is not None else bench_pct_ret
+    # Use actual hourly close prices for the test period to simulate a true Buy & Hold
+    close_test = df['close'].loc[X_test.index]
     
-    # Convert to simple returns for backtest
+    # Calculate true 1-hour simple returns
+    bench_ret = close_test.pct_change().fillna(0)
+    
+    # Strip timezone for QuantStats compatibility
+    bench_ret_aligned = bench_ret.copy()
+    if bench_ret_aligned.index.tz is not None:
+        bench_ret_aligned.index = bench_ret_aligned.index.tz_localize(None)
+
+    # Convert 12h forward returns to simple returns (for the strategy backtest)
     r_test = np.exp(r_test_log) - 1
-    bench_ret = bench_wealth.pct_change().fillna(0)
-    
     if r_test.index.tz is not None:
         r_test = r_test.tz_localize(None)
-    if bench_ret.index.tz is not None:
-        bench_ret = bench_ret.tz_localize(None)
     if y_test.index.tz is not None:
         y_test = y_test.tz_localize(None)
 
