@@ -4,20 +4,17 @@ import json
 import datetime
 import logging
 import warnings
-import yfinance as yf
 import pandas as pd
 import numpy as np
 import matplotlib
 matplotlib.use('Agg') # Use non-interactive backend for headless environments
 import matplotlib.pyplot as plt
-import quantstats as qs
-from tabulate import tabulate
 
 # Scikit-learn imports
 from sklearn.model_selection import train_test_split, TimeSeriesSplit 
 from sklearn.compose import ColumnTransformer
-from sklearn.preprocessing import StandardScaler, RobustScaler
 from sklearn.utils.class_weight import compute_sample_weight
+from sklearn.preprocessing import StandardScaler, RobustScaler
 from sklearn.metrics import (
     roc_auc_score, precision_score, recall_score, f1_score, 
     matthews_corrcoef, roc_curve, confusion_matrix, ConfusionMatrixDisplay, 
@@ -34,9 +31,10 @@ from modeling import (
     config, setup_logger, load_and_merge_data, create_features,
     feature_selection_funnel, print_oos_benchmark, 
     generate_quantstats_reports, optimize_threshold_roc,
-    mcnemar_test, backtest_with_stop_loss, max_drawdown
+    mcnemar_test, backtest_with_stop_loss, max_drawdown, remove_redundant_features
 )
 from tuning import optimize_xgb, optimize_lgbm, optimize_cat
+
 
 warnings.filterwarnings("ignore")
 
@@ -54,42 +52,14 @@ def convert_to_serializable(obj):
         return bool(obj)
     return obj
 
-def remove_redundant_features(features):
-    """
-    Remove redundant rv_ and ret_ features to prevent multicollinearity.
-    Keeps only one representative feature for each dimension (e.g., rv_48, ret_12h).
-    """
-    keep = []
-    rv_kept = False
-    ret_kept = False
-    
-    sorted_features = sorted(features, key=lambda x: (
-        0 if x == 'rv_48' else (1 if x.startswith('rv_') else 2),
-        0 if x == 'ret_12h' else (1 if x.startswith('ret_') else 2)
-    ))
-    
-    for f in sorted_features:
-        if f.startswith('rv_'):
-            if not rv_kept:
-                keep.append(f)
-                rv_kept = True
-        elif f.startswith('ret_'):
-            if not ret_kept:
-                keep.append(f)
-                ret_kept = True
-        else:
-            keep.append(f)
-            
-    return [f for f in features if f in keep]
-
 # Set working directory and output folder
 os.chdir(os.path.dirname(os.path.abspath(__file__)))
 run_time = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
 output_dir = f"log/run_{run_time}"
 os.makedirs(output_dir, exist_ok=True)
 
+# Helper function to print a concise QuantStats summary inline for debugging
 def print_quantstats_summary(strat_ret, name=""):
-    """Helper function to print QuantStats summary inline for each stage."""
     try:
         strat_ret = strat_ret.dropna()
         if strat_ret.index.tz is not None:
@@ -113,11 +83,12 @@ def print_quantstats_summary(strat_ret, name=""):
     except Exception as e:
         print(f"QuantStats summary failed for {name}: {e}")
 
+# Main Pipeline Execution
+# Orchestrates the entire machine learning pipeline from data loading to final backtesting
 def main():
     logger = setup_logger()
     logger.info("Starting Pipeline...")
 
-    # ==========================================
     # 0. Data Loading & Initial Feature Engineering
     # ==========================================
     df = load_and_merge_data(config.FILE_PATH, logger)
@@ -127,12 +98,12 @@ def main():
     final_feats = feature_selection_funnel(X, y, config.MI_TOP_K, config.CORR_THRESHOLD, config.L1_C, logger)
     logger.info(f"Initially Selected Features ({len(final_feats)}): {final_feats}")
 
-    # ==========================================
     # 1. Dataset Splitting with Gap (Prevent Look-ahead Bias)
     # ==========================================
     logger.info("Splitting data into 80% Train and 20% Test with 12-hour Purge Gap...")
     X_train_full, X_test, y_train_full, y_test = train_test_split(X[final_feats], y, test_size=0.2, shuffle=False)
     
+    # Prevent Look-ahead Bias by dropping the last 12 hours of training data
     gap = config.FORWARD_HOURS
     X_train_full = X_train_full.iloc[:-gap]
     y_train_full = y_train_full.iloc[:-gap]
@@ -140,7 +111,7 @@ def main():
     r_train_full = ret_fwd.loc[X_train_full.index]
     r_test_log = ret_fwd.loc[X_test.index]
 
-    # Benchmark calculation
+    # Benchmark calculation (Buy & Hold)
     bench_wealth = np.exp(r_test_log.cumsum())
     bench_pct_ret = bench_wealth.pct_change().dropna()
     bench_ret_aligned = bench_pct_ret.tz_localize(None) if bench_pct_ret.index.tz is not None else bench_pct_ret
@@ -183,7 +154,6 @@ def main():
         te_scaled = pd.DataFrame(preprocessor.transform(test_df[features]), columns=features, index=test_df.index)
         return tr_scaled, val_scaled, te_scaled
 
-    # ==========================================
     # STAGE 1: Baseline Model (Before Tuning)
     # ==========================================
     logger.info("\n" + "="*80)
@@ -205,17 +175,18 @@ def main():
     # Generate Stage 1 QuantStats
     generate_quantstats_reports({"XGBoost Baseline": baseline_model}, X_te_s1, r_test, bench_ret_aligned, threshold=best_th_s1, prefix="stage1_")
 
-    # ==========================================
     # STAGE 2: Tuned Models (Before Deduplication)
     # ==========================================
     logger.info("\n" + "="*80)
     logger.info("STAGE 2: HYPERPARAMETER TUNING (All Initial Features)")
     logger.info("="*80)
     
+    # Optuna Hyperparameter Optimization 
     best_xgb = optimize_xgb(X_sub_tr_s1, y_sub_train, sample_weights)
     best_lgb = optimize_lgbm(X_sub_tr_s1, y_sub_train, sample_weights)
     best_cat = optimize_cat(X_sub_tr_s1, y_sub_train, sample_weights)
 
+    # Clean up unwanted params for CatBoost
     best_cat.pop('verbose', None)
     best_cat.pop('logging_level', None)
     best_cat.pop('verbose_eval', None)
@@ -249,7 +220,6 @@ def main():
     # Generate Stage 2 QuantStats
     generate_quantstats_reports(models_tuned, X_te_s1, r_test, bench_ret_aligned, threshold=best_th_s2, prefix="stage2_")
 
-    # ==========================================
     # STAGE 3: Feature Deduplication & Re-evaluation
     # ==========================================
     logger.info("\n" + "="*80)
@@ -272,7 +242,8 @@ def main():
     }
     for model in models_dedup.values():
         model.fit(X_sub_tr_s3, y_sub_train)
-        
+
+    # Compare Predictions Between Stage 2 and Stage 3     
     p_val_s3 = models_dedup["XGBoost (Dedup)"].predict_proba(X_val_s3)[:, 1]
     best_th_s3 = optimize_threshold_roc(y_val, p_val_s3)
     
@@ -297,7 +268,6 @@ def main():
     # Generate Stage 3 QuantStats
     generate_quantstats_reports(models_dedup, X_te_s3, r_test, bench_ret_aligned, threshold=best_th_s3, prefix="stage3_")
 
-    # ==========================================
     # STAGE 4: Stop-Loss Risk Management
     # ==========================================
     logger.info("\n" + "="*80)
@@ -308,14 +278,15 @@ def main():
                                      threshold=best_th_s3, bench_ret=bench_ret, 
                                      stop_loss_pct=0.02, stage_name="STAGE 4: STOP-LOSS APPLIED", plot_curves=True)
 
-    # ==========================================
     # STAGE 5: Advanced Risk Management (Volatility Targeting + Stop-Loss)
     # ==========================================
     logger.info("\n" + "="*80)
-    logger.info("STAGE 5: VOLATILITY TARGETING & STOP-LOSS (Aiming for Max DD < 15%)")
+    logger.info("STAGE 5: VOLATILITY TARGETING & STOP-LOSS (Aiming for Max DD < 20%)")
     logger.info("="*80)
     
-    target_vol = 0.10
+
+    # Target annualized volatility
+    target_vol = 0.15
     rolling_vol = r_test.rolling(24).std() * np.sqrt(config.ANNUAL_TRADING_PERIODS)
     
     stage5_results = []
@@ -334,6 +305,7 @@ def main():
     fig, axes = plt.subplots(len(models_dedup), 3, figsize=(15, 5 * len(models_dedup)))
     if len(models_dedup) == 1: axes = [axes]
 
+    # Evaluate Dedup Models with Volatility Targeting 
     for i, (name, model) in enumerate(models_dedup.items()):
         p_te = model.predict_proba(X_te_s3)[:, 1]
         y_pred = (p_te >= best_th_s3).astype(int)
@@ -344,16 +316,23 @@ def main():
         f1 = f1_score(y_test, y_pred, zero_division=0)
         mcc = matthews_corrcoef(y_test, y_pred)
         
+        # Volatility Targeting Position Sizing
         signals = pd.Series(y_pred, index=r_test.index).shift(1).fillna(0)
-        position_size = (target_vol / (rolling_vol + 1e-6)).clip(upper=1.0).fillna(0)
+        position_size = (target_vol / (rolling_vol + 1e-6)).clip(upper=1.5).fillna(0)
         signals_sized = signals * position_size
         
-        strat_ret = signals_sized * r_test
-        strat_ret[strat_ret < -0.02] = -0.02
+        # Non-overlapping 12h sampling
+        signals_sized_non_overlap = signals_sized.iloc[::12]
+        r_test_non_overlap = r_test.iloc[::12]
         
-        turnover = signals_sized.diff().abs().fillna(0)
+        strat_ret = signals_sized_non_overlap * r_test_non_overlap
+        strat_ret[strat_ret < -0.03] = -0.03
+        
+        turnover = signals_sized_non_overlap.diff().abs().fillna(0)
         strat_ret = (strat_ret - turnover * (config.COST_BPS * 1e-4)).dropna()
         
+        trade_count = int(((signals_sized_non_overlap > 0) & (signals_sized_non_overlap.shift(1) <= 0)).sum())
+
         if len(strat_ret) == 0:
             cum_ret, mdd, sharpe = 0.0, 0.0, 0.0
         else:
@@ -365,9 +344,11 @@ def main():
         stage5_results.append({
             "Model": f"{name} + VolTarget", "ROC-AUC": round(auc_roc, 4), "Precision": round(precision, 4),
             "Recall": round(recall, 4), "F1-Score": round(f1, 4), "MCC": round(mcc, 4),
+            "Trades": trade_count,
             "Sharpe (H1)": round(sharpe, 2), "Max DD (%)": round(mdd * 100, 2), "Cum Ret (%)": round(cum_ret * 100, 2)
         })
 
+        # Plotting result
         cm = confusion_matrix(y_test, y_pred)
         ConfusionMatrixDisplay(cm).plot(ax=axes[i][0], colorbar=False)
         axes[i][0].set_title(f"{name} - Confusion Matrix (VolTarget)")
@@ -386,8 +367,7 @@ def main():
     print("="*115)
     print(df_s5.to_markdown(index=False))
 
-    # ==========================================
-    # 6. McNemar Test & Benchmark Comparison
+    # 6. Statistical Significance Testing
     # ==========================================
     y_pred_final = (models_dedup["XGBoost (Dedup)"].predict_proba(X_te_s3)[:, 1] >= best_th_s3).astype(int)
     stat, pval = mcnemar_test(y_test.values, y_pred_final, np.ones(len(y_test)))
@@ -396,7 +376,6 @@ def main():
     # Generate Final QuantStats (Stage 3 models)
     generate_quantstats_reports(models_dedup, X_te_s3, r_test, bench_ret_aligned, threshold=best_th_s3)
 
-    # ==========================================
     # 7. Save Results
     # ==========================================
     logger.info(f"\nSaving all results to {output_dir}...")
@@ -414,7 +393,7 @@ def main():
             "Threshold": best_th_s3
         }), f, indent=4)
 
-    # Move generated files
+    # Move generated HTML and PNG files to output directory
     for file in os.listdir("."):
         if (file.startswith("QuantStats_Report_") and file.endswith(".html")) or \
            (file.startswith("Model_Evaluation_Curves_") and file.endswith(".png")) or \
